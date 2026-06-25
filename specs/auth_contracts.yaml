@@ -1,0 +1,64 @@
+# /specs/auth_contracts.yaml
+openapi: 3.0.3
+info:
+  title: MedConcierge Enterprise Auth API
+  version: 1.0.0
+paths:
+  /api/auth/login:
+    post:
+      summary: Enterprise Login for Patients and Doctors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cccd
+                - password
+                - role
+              properties:
+                cccd:
+                  type: string
+                  pattern: "^[0-9]{12}$"
+                  description: National ID Card number
+                  example: "079123456789"
+                password:
+                  type: string
+                  example: "securePassword123"
+                role:
+                  type: string
+                  enum: [patient, doctor]
+                doctorId:
+                  type: string
+                  pattern: "^DOC-[0-9]{5}$"
+                  description: Mandatory only for doctors
+                  example: "DOC-99281"
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT or dynamic Internal API Key
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        example: "Bác sĩ Nguyễn Văn Nam"
+                      role:
+                        type: string
+                        example: "doctor"
+                      doctorId:
+                        type: string
+                        example: "DOC-99281"
+        '400':
+          description: Validation error
+        '401':
+          description: Invalid credentials

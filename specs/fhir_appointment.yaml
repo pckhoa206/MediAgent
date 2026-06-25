@@ -1,0 +1,87 @@
+# /specs/fhir_appointment.yaml
+openapi: 3.0.3
+info:
+  title: MedConcierge HL7 FHIR Appointment Spec
+  version: 1.0.0
+components:
+  schemas:
+    FhirAppointment:
+      type: object
+      required:
+        - resourceType
+        - status
+        - start
+        - end
+        - participant
+      properties:
+        resourceType:
+          type: string
+          enum: [Appointment]
+        id:
+          type: string
+        status:
+          type: string
+          enum: [proposed, pending, booked, arrived, fulfilled, cancelled, noshow]
+        serviceCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              coding:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    system:
+                      type: string
+                    code:
+                      type: string
+                    display:
+                      type: string
+        serviceType:
+          type: array
+          items:
+            type: object
+            properties:
+              coding:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    system:
+                      type: string
+                    code:
+                      type: string
+                    display:
+                      type: string
+        description:
+          type: string
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        participant:
+          type: array
+          items:
+            type: object
+            required:
+              - actor
+              - status
+            properties:
+              actor:
+                type: object
+                required:
+                  - reference
+                properties:
+                  reference:
+                    type: string
+                  display:
+                    type: string
+              required:
+                type: string
+                enum: [required, optional, information-only]
+              status:
+                type: string
+                enum: [accepted, declined, tentative, needs-action]
