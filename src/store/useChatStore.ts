@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { PIIMapping } from '../security/piiFilter';
 
 export interface ChatMessage {
@@ -29,11 +30,13 @@ interface ChatState {
   clearSession: () => void;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
-  sessionId: '',
-  messages: [],
-  piiMappings: [],
-  isEmergency: false,
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set) => ({
+      sessionId: '',
+      messages: [],
+      piiMappings: [],
+      isEmergency: false,
 
   initializeSession: () => {
     set({
@@ -90,12 +93,22 @@ export const useChatStore = create<ChatState>((set) => ({
     set({ isEmergency: value });
   },
 
-  clearSession: () => {
-    set({
-      sessionId: '',
-      messages: [],
-      piiMappings: [],
-      isEmergency: false,
-    });
-  },
-}));
+    clearSession: () => {
+      set({
+        sessionId: '',
+        messages: [],
+        piiMappings: [],
+        isEmergency: false,
+      });
+    },
+  }),
+  {
+    name: 'chat-storage', // key in localStorage
+    partialize: (state) => ({ 
+      sessionId: state.sessionId, 
+      messages: state.messages,
+      piiMappings: state.piiMappings,
+      isEmergency: state.isEmergency
+    }),
+  }
+));

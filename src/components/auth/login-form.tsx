@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { KeyRound, ShieldAlert, FileText, UserPlus } from 'lucide-react';
 
 export function LoginForm() {
@@ -20,16 +21,16 @@ export function LoginForm() {
     e.preventDefault();
     setErrorMsg('');
 
-    // 1. Validate CCCD Format (strict 12 digits)
+    // Validate CCCD
     const cccdRegex = /^[0-9]{12}$/;
     if (!cccdRegex.test(cccd)) {
-      setErrorMsg('Mã định danh CCCD phải đủ 12 chữ số.');
+      setErrorMsg('Citizen ID must be exactly 12 digits.');
       return;
     }
 
     // 2. Validate Password
     if (password.length < 6) {
-      setErrorMsg('Mật khẩu phải chứa ít nhất 6 ký tự.');
+      setErrorMsg('Password must be at least 6 characters.');
       return;
     }
 
@@ -37,11 +38,11 @@ export function LoginForm() {
     if (role === 'doctor') {
       const docIdRegex = /^DOC-[0-9]{5}$/;
       if (!doctorId.trim()) {
-        setErrorMsg('Mã bác sĩ là bắt buộc đối với tài khoản Bác sĩ.');
+        setErrorMsg('Doctor ID is required for Doctor accounts.');
         return;
       }
       if (!docIdRegex.test(doctorId)) {
-        setErrorMsg('Mã bác sĩ phải đúng định dạng DOC-XXXXX (Ví dụ: DOC-12345).');
+        setErrorMsg('Doctor ID must be in DOC-XXXXX format (e.g., DOC-12345).');
         return;
       }
     }
@@ -49,18 +50,26 @@ export function LoginForm() {
     setIsLoading(true);
 
     try {
-      // Simulate API verification and internal key exchange
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Call the Mock Login API
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cccd, password, role, doctorId }),
+      });
 
-      const mockToken = `mock-api-key-${crypto.randomUUID().slice(0, 8)}`;
-      const name = role === 'doctor' ? 'Bác sĩ Nguyễn Văn Nam' : 'Bệnh Nhân Minh Khoa';
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Login failed');
+      }
+
+      const data = await res.json();
 
       loginStore({
-        cccd,
-        role,
-        doctorId: role === 'doctor' ? doctorId : undefined,
-        userName: name,
-        token: mockToken,
+        cccd: data.user.cccd,
+        role: data.user.role,
+        doctorId: data.user.doctorId,
+        userName: data.user.userName || (data.user.role === 'doctor' ? 'Anonymous Doctor' : 'Anonymous Patient'),
+        token: data.token,
       });
 
       // Redirect based on role
@@ -69,8 +78,8 @@ export function LoginForm() {
       } else {
         router.push('/chat');
       }
-    } catch (err) {
-      setErrorMsg('Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Login failed. Please check your information.');
     } finally {
       setIsLoading(false);
     }
@@ -80,13 +89,13 @@ export function LoginForm() {
     <div className="w-full max-w-md space-y-6 rounded-3xl border border-slate-900 bg-slate-950/60 p-8 backdrop-blur-md shadow-2xl shadow-slate-950/50">
       <div className="text-center space-y-2">
         <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <KeyRound className="h-6 w-6" aria-hidden="true" />
+          <ShieldAlert className="h-6 w-6" aria-hidden="true" />
         </div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-100">
-          Cổng Đăng Nhập Hệ Thống
+          System Login Portal
         </h2>
         <p className="text-xs text-slate-400">
-          Vui lòng điền thông tin CCCD và tài khoản doanh nghiệp được cấp
+          Please enter your ID and credentials
         </p>
       </div>
 
@@ -103,7 +112,7 @@ export function LoginForm() {
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          Bệnh Nhân
+          Patient
         </button>
         <button
           type="button"
@@ -116,7 +125,7 @@ export function LoginForm() {
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          Bác Sĩ
+          Doctor
         </button>
       </div>
 
@@ -137,7 +146,7 @@ export function LoginForm() {
         {/* CCCD Input */}
         <div className="space-y-1.5">
           <label htmlFor="cccd" className="text-xs font-semibold text-slate-400">
-            Số Định Danh (CCCD)
+            Citizen ID (CCCD)
           </label>
           <input
             id="cccd"
@@ -146,7 +155,7 @@ export function LoginForm() {
             maxLength={12}
             value={cccd}
             onChange={(e) => setCccd(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="Nhập 12 chữ số CCCD"
+            placeholder="Enter 12 digits"
             aria-describedby={errorMsg ? 'error-announcement' : undefined}
             className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
           />
@@ -155,7 +164,7 @@ export function LoginForm() {
         {/* Password Input */}
         <div className="space-y-1.5">
           <label htmlFor="password" className="text-xs font-semibold text-slate-400">
-            Mật Khẩu
+            Password
           </label>
           <input
             id="password"
@@ -163,7 +172,7 @@ export function LoginForm() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Nhập mật khẩu"
+            placeholder="Enter password"
             className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
           />
         </div>
@@ -172,7 +181,7 @@ export function LoginForm() {
         {role === 'doctor' && (
           <div className="space-y-1.5 animate-fadeIn">
             <label htmlFor="doctorId" className="text-xs font-semibold text-slate-400">
-              Mã Bác Sĩ (Doctor ID)
+              Doctor ID
             </label>
             <input
               id="doctorId"
@@ -180,7 +189,7 @@ export function LoginForm() {
               required
               value={doctorId}
               onChange={(e) => setDoctorId(e.target.value)}
-              placeholder="Ví dụ: DOC-12345"
+              placeholder="e.g.: DOC-12345"
               className="w-full rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
             />
           </div>
@@ -192,9 +201,15 @@ export function LoginForm() {
           disabled={isLoading}
           className="w-full rounded-xl bg-emerald-600 py-3.5 text-sm font-bold text-white shadow-md hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 transition-all duration-200"
         >
-          {isLoading ? 'Đang xác thực...' : 'Đăng Nhập'}
+          {isLoading ? 'Authenticating...' : 'Login'}
         </button>
       </form>
+
+      <div className="mt-4 text-center">
+        <Link href="/register" className="text-sm text-emerald-500 hover:text-emerald-400 transition-colors">
+          Don't have an account? Register now
+        </Link>
+      </div>
     </div>
   );
 }
