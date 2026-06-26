@@ -1,4 +1,4 @@
-# Dev 2 Technical Report — CONCIERGE MEDICAL AGENT
+#Technical Report — CONCIERGE MEDICAL AGENT
 
 > 🇬🇧 **English** | 🇻🇳 **Tiếng Việt** (below)
 
