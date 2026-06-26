@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MediAgent
 
-## Getting Started
+MediAgent is a medical concierge AI prototype focused on patient triage, doctor workflow, and secure client-side handling of sensitive health data.
 
-First, run the development server:
+## What changed in the Dev 2 upgrade
+
+- Stronger appointment persistence through browser storage for booking and cancellation flows.
+- Safer chat session storage by avoiding full message payload persistence in localStorage.
+- A more realistic realtime sync layer using browser broadcast channels and calendar state changes.
+- A more robust API client with automatic credentials handling and refresh-token-friendly request setup.
+- Updated documentation for local development and testing.
+
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Main routes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- /login
+- /register
+- /chat
+- /patient/dashboard
+- /doctor/dashboard
 
-## Learn More
+## Testing
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm test
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notes
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Authentication is still mock-based for demo purposes.
+- AI streaming can run in mock mode or with a real Gemini API key when configured.
+- Sensitive patient data is masked client-side before being sent to external AI services.

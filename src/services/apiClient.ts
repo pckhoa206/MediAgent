@@ -26,10 +26,13 @@ export async function apiClient<T>(
     }
   }
 
+  const hasBody = customOptions.body !== undefined;
+
   const config: RequestInit = {
     ...customOptions,
+    credentials: customOptions.credentials ?? 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...authHeaders,
       ...headers,
     },

@@ -103,12 +103,10 @@ export const useChatStore = create<ChatState>()(
     },
   }),
   {
-    name: 'chat-storage', // key in localStorage
-    partialize: (state) => ({ 
-      sessionId: state.sessionId, 
-      messages: state.messages,
-      piiMappings: state.piiMappings,
-      isEmergency: state.isEmergency
+    name: 'chat-storage',
+    partialize: (state) => ({
+      sessionId: state.sessionId,
+      isEmergency: state.isEmergency,
     }),
   }
 ));

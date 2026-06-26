@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import SpeechToTextRecorder from './SpeechToTextRecorder';
+import { clearEMRDraft, loadEMRDraft, saveEMRDraft } from '../../services/emrStorage';
 
 export default function EMRForm() {
   const [symptoms, setSymptoms] = useState('');
@@ -10,34 +11,31 @@ export default function EMRForm() {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // Load from local storage on mount
   useEffect(() => {
-    const saved = localStorage.getItem('emr_draft');
+    const saved = loadEMRDraft();
     if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed.symptoms) setSymptoms(parsed.symptoms);
-        if (parsed.diagnosis) setDiagnosis(parsed.diagnosis);
-        if (parsed.prescription) setPrescription(parsed.prescription);
-      } catch (e) {
-        // ignore JSON error
-      }
+      setSymptoms(saved.symptoms);
+      setDiagnosis(saved.diagnosis);
+      setPrescription(saved.prescription);
     }
   }, []);
 
-  // Autosave effect (debounced)
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsSaving(true);
-      const draft = { symptoms, diagnosis, prescription };
-      localStorage.setItem('emr_draft', JSON.stringify(draft));
-      
-      // Simulate API call for autosave
-      setTimeout(() => {
+      const draft = {
+        symptoms,
+        diagnosis,
+        prescription,
+        updatedAt: Date.now(),
+      };
+      saveEMRDraft(draft);
+
+      window.setTimeout(() => {
         setIsSaving(false);
         setLastSaved(new Date());
       }, 500);
-    }, 1500);
+    }, 1200);
 
     return () => clearTimeout(timer);
   }, [symptoms, diagnosis, prescription]);
@@ -106,8 +104,16 @@ export default function EMRForm() {
         <button 
           className="bg-teal-600 hover:bg-teal-700 text-white font-medium py-2 px-8 rounded-lg transition-colors"
           onClick={() => {
-            alert('EMR has been successfully saved!');
-            localStorage.removeItem('emr_draft');
+            const draft = {
+              symptoms,
+              diagnosis,
+              prescription,
+              updatedAt: Date.now(),
+            };
+            saveEMRDraft(draft);
+            clearEMRDraft();
+            setLastSaved(new Date());
+            window.alert('EMR has been successfully saved!');
           }}
         >
           Complete & Save EMR
