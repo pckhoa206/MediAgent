@@ -20,7 +20,7 @@ const MEDICAL_KEYWORDS = [
   'đau', 'mỏi', 'nhức', 'mệt', 'khó thở', 'tức ngực', 'ù tai', 'chóng mặt',
   'sốt', 'ho', 'sổ mũi', 'cảm', 'nghẹt mũi', 'y khoa', 'sức khỏe', 'bác sĩ',
   'khám', 'bệnh', 'thuốc', 'điều trị', 'lịch hẹn', 'đặt lịch', 'khoa', 'tim mạch',
-  'tai - mũi - họng', 'nhi khoa', 'xương khớp', 'da liễu'
+  'tai - mũi - họng', 'nhi khoa', 'xương khớp', 'da liễu', 'lên lịch', 'đăng ký khám', 'hẹn khám', 'book', 'schedule'
 ];
 
 const NON_MEDICAL_PATTERNS = [

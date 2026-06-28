@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { mockUsers } from '../mockDb';
+import { getMockUsers } from '../mockDb';
 
 export async function POST(request: Request) {
   try {
@@ -14,8 +14,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const currentUsers = getMockUsers();
+
     // Accept password '123456' as a demo bypass, otherwise check registered users
-    const registeredUser = mockUsers[cccd];
+    const registeredUser = currentUsers[cccd];
     const isValidPassword =
       password === '123456' || (registeredUser && registeredUser.password === password);
 

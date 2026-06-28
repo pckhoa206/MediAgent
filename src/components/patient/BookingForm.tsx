@@ -1,108 +1,110 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useCalendarStore } from '../../store/useCalendarStore';
+import { useAuthStore } from '../../store/useAuthStore';
+import { CalendarRange, Sparkles } from 'lucide-react';
 
 export default function BookingForm() {
-  const [department, setDepartment] = useState('');
-  const [doctor, setDoctor] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
-  
+  const { slots, bookAppointment } = useCalendarStore();
+  const { userCccd, userName } = useAuthStore();
+
+  const [selectedSlotId, setSelectedSlotId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Filter unbooked slots
+  const availableSlots = slots.filter(s => !s.isBooked);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
+    setIsSuccess(false);
+
+    if (!selectedSlotId) {
+      setErrorMsg('Vui lòng chọn khung giờ khám.');
+      return;
+    }
+
+    if (!userCccd || !userName) {
+      setErrorMsg('Không thể xác thực thông tin bệnh nhân. Vui lòng đăng nhập lại.');
+      return;
+    }
+
     setIsSubmitting(true);
     
-    // Mock API call
+    // Simulate slight delay for realistic API simulation
     setTimeout(() => {
+      const appointment = bookAppointment({
+        patientCccd: userCccd,
+        patientName: userName,
+        slotId: selectedSlotId
+      });
+
       setIsSubmitting(false);
-      setIsSuccess(true);
-      setDepartment('');
-      setDoctor('');
-      setDate('');
-      setTime('');
-      setTimeout(() => setIsSuccess(false), 3000);
-    }, 1000);
+
+      if (appointment) {
+        setIsSuccess(true);
+        setSelectedSlotId('');
+        setTimeout(() => setIsSuccess(false), 4000);
+      } else {
+        setErrorMsg('Không thể đăng ký lịch khám. Khung giờ này có thể đã bị đặt.');
+      }
+    }, 800);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {isSuccess && (
-        <div className="bg-green-50 text-green-700 p-3 rounded-lg border border-green-200">
-          Appointment booked successfully! We will contact you soon.
+        <div className="bg-emerald-950/40 text-emerald-400 p-4 rounded-xl border border-emerald-500/20 text-xs font-semibold animate-pulse-subtle flex items-center gap-2">
+          <Sparkles className="w-4.5 h-4.5 text-emerald-400 shrink-0" />
+          <span>Đặt lịch khám thành công! Theo dõi lịch hẹn tại bảng bên cạnh hoặc trang Chat.</span>
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-          <select 
-            required
-            className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-            value={department}
-            onChange={(e) => setDepartment(e.target.value)}
-          >
-            <option value="">-- Select department --</option>
-            <option value="cardio">Cardiology</option>
-            <option value="neuro">Neurology</option>
-            <option value="derma">Dermatology</option>
-            <option value="general">General</option>
-          </select>
+
+      {errorMsg && (
+        <div className="bg-red-950/40 text-red-400 p-4 rounded-xl border border-red-500/20 text-xs font-semibold">
+          {errorMsg}
         </div>
+      )}
+
+      <div className="space-y-2">
+        <label htmlFor="slotSelect" className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+          Khung giờ & Chuyên khoa có sẵn
+        </label>
         
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Doctor</label>
+        {availableSlots.length === 0 ? (
+          <p className="text-xs text-red-400 italic font-medium">Hiện tại không còn khung giờ khám trống nào.</p>
+        ) : (
           <select 
+            id="slotSelect"
             required
-            className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-            value={doctor}
-            onChange={(e) => setDoctor(e.target.value)}
+            className="w-full border border-slate-800 bg-slate-900/40 rounded-xl p-3 text-xs text-slate-200 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500 outline-none transition-colors"
+            value={selectedSlotId}
+            onChange={(e) => setSelectedSlotId(e.target.value)}
           >
-            <option value="">-- Select doctor --</option>
-            <option value="dr_a">Dr. Nguyen Van A</option>
-            <option value="dr_b">Dr. Tran Thi B</option>
+            <option value="" className="bg-slate-950 text-slate-400">-- Chọn khoa và khung giờ trống --</option>
+            {availableSlots.map((s) => (
+              <option key={s.id} value={s.id} className="bg-slate-950 text-slate-200">
+                {s.department} · {s.time} (Bác sĩ: {s.assignedDoctorId})
+              </option>
+            ))}
           </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-          <input 
-            type="date" 
-            required
-            className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
-          <select 
-            required
-            className="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-          >
-            <option value="">-- Select time --</option>
-            <option value="08:00">08:00 AM</option>
-            <option value="09:00">09:00 AM</option>
-            <option value="10:00">10:00 AM</option>
-            <option value="14:00">02:00 PM</option>
-            <option value="15:00">03:00 PM</option>
-          </select>
-        </div>
+        )}
       </div>
 
       <div className="flex justify-end pt-2">
         <button 
           type="submit" 
-          disabled={isSubmitting}
-          className="bg-teal-600 hover:bg-teal-700 text-white font-medium py-2 px-6 rounded-lg transition-colors disabled:opacity-50"
+          disabled={isSubmitting || availableSlots.length === 0}
+          className="bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs py-3 px-6 rounded-xl transition-all shadow disabled:opacity-50 disabled:bg-slate-800 disabled:text-slate-600"
         >
-          {isSubmitting ? 'Booking...' : 'Confirm Booking'}
+          {isSubmitting ? 'Đang đặt lịch...' : 'Xác Nhận Đặt Lịch'}
         </button>
       </div>
     </form>
   );
 }
+
+

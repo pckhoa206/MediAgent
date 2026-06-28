@@ -6,9 +6,10 @@ import { useChatStream } from '../../hooks/useChatStream';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useCalendarStore } from '../../store/useCalendarStore';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { ChatMessage } from '../../components/medical/chat-message';
 import { TriageCard } from '../../components/medical/triage-card';
-import { Send, Heart, Activity, AlertCircle, RefreshCw, ChevronRight, User, Trash2, Calendar as CalendarIcon, LogOut } from 'lucide-react';
+import { Send, Heart, Activity, AlertCircle, RefreshCw, ChevronRight, User, Trash2, Calendar as CalendarIcon, LogOut, BarChart3 } from 'lucide-react';
 
 export default function ChatPage() {
   const { messages, sessionId, isEmergency, initializeSession, clearSession } = useChatStore();
@@ -120,6 +121,14 @@ export default function ChatPage() {
             <RefreshCw className="h-3.5 w-3.5" />
             <span className="hidden md:inline">Làm mới phiên</span>
           </button>
+
+          <Link
+            href="/tracker"
+            className="flex items-center gap-2 rounded-xl bg-indigo-950/40 border border-indigo-500/20 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-950/80 transition-colors"
+          >
+            <BarChart3 className="h-3.5 w-3.5" />
+            <span>Remediation Tracker</span>
+          </Link>
           
           <button
             onClick={() => logout()}

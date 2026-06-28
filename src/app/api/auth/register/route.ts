@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { mockUsers } from '../mockDb';
+import { getMockUsers, saveMockUser } from '../mockDb';
 
 export async function POST(request: Request) {
   try {
@@ -20,16 +20,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const currentUsers = getMockUsers();
+
     // Check for duplicate registration
-    if (mockUsers[cccd]) {
+    if (currentUsers[cccd]) {
       return NextResponse.json(
         { message: 'An account with this Citizen ID already exists.' },
         { status: 409 }
       );
     }
 
-    // Save to in-memory store (in production: hash password, write to DB)
-    mockUsers[cccd] = { cccd, password, role, fullName, dob, gender, doctorId };
+    // Save to persistent JSON database
+    saveMockUser(cccd, { cccd, password, role, fullName, dob, gender, doctorId });
 
     return NextResponse.json(
       { message: 'Registration successful.', success: true },
