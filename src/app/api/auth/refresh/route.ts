@@ -1,29 +1,29 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { verifyJWT, createJWT } from '@/lib/auth/jwt';
 
 export async function POST() {
-  const cookieStore = await cookies();
-  const refreshToken = cookieStore.get('refreshToken');
+  try {
+    const cookieStore = await cookies();
+    const refreshToken = cookieStore.get('refreshToken')?.value;
+    if (!refreshToken) {
+      return NextResponse.json({ message: 'No refresh token.' }, { status: 401 });
+    }
 
-  if (!refreshToken || !refreshToken.value) {
-    return NextResponse.json(
-      { message: 'Không tìm thấy refresh token.' },
-      { status: 401 }
-    );
+    const payload = verifyJWT(refreshToken);
+    if (!payload) {
+      return NextResponse.json({ message: 'Invalid refresh token.' }, { status: 401 });
+    }
+
+    const accessToken = createJWT({
+      cccd: payload.cccd,
+      userName: payload.userName,
+      role: payload.role,
+      doctorId: payload.doctorId,
+    });
+
+    return NextResponse.json({ token: accessToken });
+  } catch {
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
   }
-
-  // Validate the mock refresh token (in a real app, verify signature/DB)
-  if (!refreshToken.value.startsWith('mock-refresh-token')) {
-    return NextResponse.json(
-      { message: 'Refresh token không hợp lệ.' },
-      { status: 401 }
-    );
-  }
-
-  // Generate a new access token
-  const newAccessToken = 'mock-access-token-refreshed-' + Date.now();
-
-  return NextResponse.json({
-    token: newAccessToken,
-  });
 }

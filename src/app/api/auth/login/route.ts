@@ -1,51 +1,42 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { getMockUsers } from '../mockDb';
+import { findUser, verifyPassword, writeAuditLog } from '@/lib/db/store';
+import { createJWT, createRefreshToken } from '@/lib/auth/jwt';
+import { logEvent } from '@/lib/observability';
+import type { UserRole } from '@/types';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for') || '127.0.0.1';
   try {
     const body = await request.json();
-    const { cccd, password, role } = body;
+    const { cccd, password, role } = body as { cccd: string; password: string; role: UserRole };
 
     if (!cccd || !password || !role) {
-      return NextResponse.json(
-        { message: 'All required fields must be filled in.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: 'Missing required fields.' }, { status: 400 });
     }
 
-    const currentUsers = getMockUsers();
-
-    // Accept password '123456' as a demo bypass, otherwise check registered users
-    const registeredUser = currentUsers[cccd];
-    const isValidPassword =
-      password === '123456' || (registeredUser && registeredUser.password === password);
-
-    if (!isValidPassword) {
-      return NextResponse.json(
-        { message: 'Incorrect Citizen ID or password.' },
-        { status: 401 }
-      );
+    const user = await findUser(cccd);
+    if (!user || user.role !== role) {
+      await writeAuditLog(null, role, 'LOGIN_FAIL', `CCCD:${cccd}`, ip);
+      logEvent({ level: 'warn', message: 'login_failed', context: { cccd, role, ip } });
+      return NextResponse.json({ message: 'Incorrect credentials.' }, { status: 401 });
     }
 
-    // Resolve display name and doctor ID from registered user or fallback
-    const userName = registeredUser
-      ? registeredUser.fullName
-      : role === 'doctor'
-      ? 'Dr. Demo Account'
-      : 'Patient Demo Account';
+    if (!verifyPassword(password, user.passwordHash)) {
+      await writeAuditLog(cccd, role, 'LOGIN_FAIL_WRONG_PASSWORD', `CCCD:${cccd}`, ip);
+      return NextResponse.json({ message: 'Incorrect credentials.' }, { status: 401 });
+    }
 
-    const doctorIdField = registeredUser
-      ? registeredUser.doctorId
-      : role === 'doctor'
-      ? 'DOC-00000'
-      : undefined;
+    const authUser = {
+      cccd: user.cccd,
+      userName: user.fullName,
+      role: user.role,
+      doctorId: user.doctorId,
+    };
 
-    // Issue mock tokens
-    const accessToken = 'mock-access-token-' + Date.now();
-    const refreshToken = 'mock-refresh-token-' + Date.now();
+    const accessToken = createJWT(authUser);
+    const refreshToken = createRefreshToken(authUser);
 
-    // Set HttpOnly cookie for Refresh Token (secure, not accessible via JS)
     const cookieStore = await cookies();
     cookieStore.set({
       name: 'refreshToken',
@@ -54,22 +45,13 @@ export async function POST(request: Request) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
       path: '/',
-      maxAge: 7 * 24 * 60 * 60, // 7 days
+      maxAge: 7 * 24 * 60 * 60,
     });
 
-    return NextResponse.json({
-      token: accessToken,
-      user: {
-        cccd,
-        userName,
-        role,
-        doctorId: doctorIdField,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { message: 'Internal Server Error' },
-      { status: 500 }
-    );
+    await writeAuditLog(cccd, role, 'LOGIN_SUCCESS', `CCCD:${cccd}`, ip);
+    logEvent({ level: 'info', message: 'login_success', context: { cccd, role, ip } });
+    return NextResponse.json({ token: accessToken, user: authUser });
+  } catch {
+    return NextResponse.json({ message: 'Internal Server Error' }, { status: 500 });
   }
 }

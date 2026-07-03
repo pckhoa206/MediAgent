@@ -43,6 +43,41 @@ const MOCK_SLOTS: TimeSlot[] = [
   { id: 'slot-5', time: '15:00 - 16:00', department: 'Khoa Tim Mạch', isBooked: false, assignedDoctorId: 'DOC-22334' }
 ];
 
+import CryptoJS from 'crypto-js';
+
+const STORAGE_SECRET = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+  ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+  : 'mediagent-default-secret-key-32-chars';
+
+const secureStorage = {
+  getItem: (name: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem(name);
+    if (!raw) return null;
+    try {
+      const bytes = CryptoJS.AES.decrypt(raw, STORAGE_SECRET);
+      const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+      return decrypted || null;
+    } catch (e) {
+      console.error('[useCalendarStore] Failed to decrypt state', e);
+      return null;
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      const encrypted = CryptoJS.AES.encrypt(value, STORAGE_SECRET).toString();
+      localStorage.setItem(name, encrypted);
+    } catch (e) {
+      console.error('[useCalendarStore] Failed to encrypt state', e);
+    }
+  },
+  removeItem: (name: string): void => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(name);
+  }
+};
+
 export const useCalendarStore = create<CalendarState>()(
   persist(
     (set, get) => ({
@@ -134,7 +169,7 @@ export const useCalendarStore = create<CalendarState>()(
     }),
     {
       name: 'calendar-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => secureStorage),
       partialize: (state) => ({
         slots: state.slots,
         appointments: state.appointments,

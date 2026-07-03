@@ -11,7 +11,8 @@ const textDecoder = new TextDecoder();
  * Uses SHA-256 to hash the key material to a standard 256-bit key length.
  */
 async function deriveKey(secretKey: string): Promise<CryptoKey> {
-  const rawKey = textEncoder.encode(secretKey || 'mediagent-default-secret-key-32-chars');
+  const defaultKey = typeof process !== 'undefined' && process.env ? process.env.NEXT_PUBLIC_CRYPTO_SECRET : undefined;
+  const rawKey = textEncoder.encode(secretKey || defaultKey || 'mediagent-default-secret-key-32-chars');
   const keyDigest = await crypto.subtle.digest('SHA-256', rawKey);
   
   return crypto.subtle.importKey(

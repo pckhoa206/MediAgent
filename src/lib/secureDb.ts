@@ -33,19 +33,33 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+import { encryptData, decryptData } from './aesGcm';
+
+const getCryptoSecretForUser = (userId: string): string => {
+  const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+    ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+    : 'mediagent-default-secret-key-32-chars';
+  return `${baseSecret}_${userId}`;
+};
+
 /**
  * Saves a ChatMessage to IndexedDB, keyed by the active user's ID.
  */
 export async function saveMessageToDB(message: ChatMessage, userId: string): Promise<void> {
   try {
     const db = await openDB();
+    const secretKey = getCryptoSecretForUser(userId);
+    const encryptedContent = await encryptData(message.content, secretKey);
+
     return new Promise<void>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       
-      // Inject the userId into the record prior to saving
+      // Inject the userId into the record prior to saving and encrypt content
       const record = {
         ...message,
+        content: encryptedContent,
+        isEncrypted: true,
         userId: userId
       };
       
@@ -71,16 +85,41 @@ export async function saveMessageToDB(message: ChatMessage, userId: string): Pro
 export async function getMessagesFromDB(userId: string): Promise<ChatMessage[]> {
   try {
     const db = await openDB();
+    const secretKey = getCryptoSecretForUser(userId);
+
     return new Promise<ChatMessage[]>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, 'readonly');
       const store = transaction.objectStore(STORE_NAME);
       const request = store.getAll();
 
-      request.onsuccess = () => {
+      request.onsuccess = async () => {
         const results = request.result || [];
         // Filter records strictly by the active user's ID
         const filtered = results.filter((record: any) => record.userId === userId);
-        resolve(filtered);
+        
+        // Decrypt records in parallel
+        const decrypted = await Promise.all(
+          filtered.map(async (record: any) => {
+            if (record.isEncrypted && record.content) {
+              try {
+                const plainText = await decryptData(record.content, secretKey);
+                return {
+                  ...record,
+                  content: plainText
+                };
+              } catch (e) {
+                console.error(`[secureDb.ts] Failed to decrypt message ${record.id}:`, e);
+                return {
+                  ...record,
+                  content: '[Mất khóa giải mã - Tin nhắn được bảo mật]'
+                };
+              }
+            }
+            return record;
+          })
+        );
+
+        resolve(decrypted);
       };
 
       request.onerror = () => {

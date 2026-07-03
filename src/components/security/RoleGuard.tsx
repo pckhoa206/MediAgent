@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 
 interface RoleGuardProps {
   children: React.ReactNode;
-  allowedRoles: ('patient' | 'doctor')[];
+  allowedRoles: ('patient' | 'doctor' | 'admin')[];
 }
 
 export function RoleGuard({ children, allowedRoles }: RoleGuardProps) {

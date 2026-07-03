@@ -5,12 +5,14 @@ import { Mic, Square } from 'lucide-react';
 
 interface Props {
   onResult: (text: string) => void;
+  onError?: (error: string) => void;
+  className?: string;
 }
 
-export default function SpeechToTextRecorder({ onResult }: Props) {
+export default function SpeechToTextRecorder({ onResult, onError, className = '' }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
-  const [lang, setLang] = useState<'en-US' | 'vi-VN'>('en-US');
+  const [lang, setLang] = useState<'en-US' | 'vi-VN'>('vi-VN'); // Default to vi-VN for better localization
   const [hasSpeechAPI, setHasSpeechAPI] = useState(false);
 
   const recognitionRef = useRef<any>(null);
@@ -24,24 +26,34 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
     if (!SpeechRecognition) return null;
 
     const rec = new SpeechRecognition();
-    rec.continuous = false;
-    rec.interimResults = false;
+    rec.continuous = true; // Upgrade: continuous listening
+    rec.interimResults = true; // Upgrade: interim results
     rec.lang = lang;
 
     rec.onresult = (event: any) => {
-      const text: string = event.results[0][0].transcript;
-      onResult(text);
-      setIsRecording(false);
+      let newlyFinalized = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          newlyFinalized += event.results[i][0].transcript + ' ';
+        }
+      }
+      if (newlyFinalized) {
+        onResult(newlyFinalized.trim());
+      }
     };
 
-    rec.onerror = () => {
+    rec.onerror = (event: any) => {
       setIsRecording(false);
-      // Graceful fallback demo text
-      onResult(
-        lang === 'vi-VN'
-          ? 'Bệnh nhân có dấu hiệu mệt mỏi, sốt nhẹ và đau đầu.'
-          : 'The patient shows signs of fatigue, mild fever, and headache.'
-      );
+      const errorMsg = event.error ? `Speech recognition error: ${event.error}` : 'Microphone access error';
+      if (onError) {
+        onError(errorMsg);
+      } else {
+        alert(
+          lang === 'vi-VN'
+            ? `Lỗi nhận diện giọng nói: ${event.error || 'không thể truy cập micro'}.`
+            : `Speech recognition error: ${event.error || 'cannot access microphone'}.`
+        );
+      }
     };
 
     rec.onend = () => {
@@ -49,7 +61,7 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
     };
 
     return rec;
-  }, [lang, onResult]);
+  }, [lang, onResult, onError]);
 
   // Initialise / reinitialise when lang changes
   useEffect(() => {
@@ -85,36 +97,36 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
       recognitionRef.current?.stop();
       setIsRecording(false);
     } else {
-      setIsRecording(true);
       if (recognitionRef.current) {
+        setIsRecording(true);
         try {
           recognitionRef.current.start();
         } catch (_) {
           /* already running guard */
         }
       } else {
-        // Fallback: no Web Speech API available
-        setTimeout(() => {
-          setIsRecording(false);
-          onResult(
-            lang === 'vi-VN'
-              ? 'Bệnh nhân có dấu hiệu mệt mỏi, sốt nhẹ và đau đầu.'
-              : 'The patient shows signs of fatigue, mild fever, and headache.'
-          );
-        }, 1500);
+        const noSupportMsg =
+          lang === 'vi-VN'
+            ? 'Trình duyệt không hỗ trợ Web Speech API. Vui lòng dùng Chrome.'
+            : 'Browser does not support Web Speech API. Please use Chrome.';
+        if (onError) {
+          onError(noSupportMsg);
+        } else {
+          alert(noSupportMsg);
+        }
       }
     }
   };
 
   return (
-    <div className="flex items-center space-x-2">
+    <div className={`flex items-center space-x-2 ${className}`}>
       {/* Language Toggle */}
       <select
         value={lang}
         onChange={(e) => setLang(e.target.value as 'en-US' | 'vi-VN')}
         disabled={isRecording}
         title="Select speech language"
-        className="text-xs border border-gray-300 rounded p-1 outline-none text-gray-600 disabled:opacity-50"
+        className="text-[10px] border border-slate-800 bg-[#0f1712] rounded p-1 outline-none text-slate-400 disabled:opacity-50"
       >
         <option value="en-US">🇬🇧 EN</option>
         <option value="vi-VN">🇻🇳 VI</option>
@@ -126,12 +138,12 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
           {[1, 2, 3, 4, 5].map((bar) => (
             <div
               key={bar}
-              className="w-1 bg-red-500 rounded-full transition-all duration-75 ease-in-out"
+              className="w-1 bg-[#4d7c5d] rounded-full transition-all duration-75 ease-in-out"
               style={{ height: `${Math.max(16, volume * (0.4 + bar * 0.12))}%` }}
             />
           ))}
-          <span className="text-xs text-red-500 font-medium ml-2 animate-pulse">
-            Recording...
+          <span className="text-[10px] text-[#7FB08E] font-medium ml-2 animate-pulse">
+            Listening...
           </span>
         </div>
       )}
@@ -142,8 +154,8 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
         onClick={toggleRecording}
         className={`p-2 rounded-full transition-colors ${
           isRecording
-            ? 'bg-red-100 text-red-600 hover:bg-red-200'
-            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            ? 'bg-red-950/40 text-red-400 border border-red-500/20 hover:bg-red-900/50'
+            : 'bg-[#0f1712]/50 text-slate-400 border border-[#1c2e24] hover:bg-[#14231b]'
         }`}
         title={
           !hasSpeechAPI
@@ -153,7 +165,7 @@ export default function SpeechToTextRecorder({ onResult }: Props) {
             : 'Start voice input'
         }
       >
-        {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        {isRecording ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
       </button>
     </div>
   );

@@ -21,7 +21,18 @@ describe('useCalendarStore persistence', () => {
 
     expect(result).not.toBeNull();
     const persisted = localStorage.getItem('calendar-storage');
-    expect(persisted).toContain('123456789012');
-    expect(persisted).toContain('Nguyen Van A');
+    expect(persisted).not.toBeNull();
+    // Verify it is encrypted and does not leak cleartext PII
+    expect(persisted).not.toContain('123456789012');
+    expect(persisted).not.toContain('Nguyen Van A');
+
+    // Verify it can be decrypted successfully using the storage key
+    const CryptoJS = require('crypto-js');
+    const STORAGE_SECRET = process.env.NEXT_PUBLIC_CRYPTO_SECRET || 'mediagent-default-secret-key-32-chars';
+    const bytes = CryptoJS.AES.decrypt(persisted!, STORAGE_SECRET);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    
+    expect(decrypted).toContain('123456789012');
+    expect(decrypted).toContain('Nguyen Van A');
   });
 });

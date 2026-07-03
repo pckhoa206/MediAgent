@@ -34,14 +34,23 @@ import {
 import DOMPurify from 'dompurify';
 import { useCalendarStore, Appointment } from '@/store/useCalendarStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useChatStore, ChatMessage } from '@/store/useChatStore';
+import { ChatMessage } from '@/store/useChatStore';
 import { encryptData, decryptData } from '@/lib/aesGcm';
-import { saveMessageToDB, getMessagesFromDB, clearMessagesFromDB } from '@/lib/secureDb';
-import { maskPII } from '@/security/piiFilter';
-import { restorePII } from '@/security/tokenMapper';
+import { maskPII } from '@/modules/security/pii';
+import { restorePII } from '@/modules/security/pii';
 import { matchDepartment, MEDICAL_DEPARTMENTS } from '@/utils/medical-departments';
-import { evaluateAgentGuardrail } from '@/security/agentGuardrail';
+import { evaluateAgentGuardrail } from '@/modules/security/guardrail';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
+import type { Lang, TranslationKey } from '@/constants/translations';
+import { AppHeader } from '@/components/shell/AppHeader';
+import { PatientSidebar } from '@/components/shell/PatientSidebar';
+import { ChatUI } from '@/components/chat/ChatUI';
+import { AuthPortal } from '@/components/auth/AuthPortal';
+import { OnboardingTooltip } from '@/components/onboarding/OnboardingTooltip';
+import { syncMessageToServer, loadChatHistory } from '@/modules/chat/sync';
+import { createSecureBooking, fetchAppointments, completeAppointment } from '@/modules/booking/service';
+import { submitEMR } from '@/modules/emr/service';
+import { useSpeechOutput, CONFIDENCE_STRIP_PATTERNS } from '@/hooks/useSpeechOutput';
 
 // -------------------------------------------------------------
 // BILINGUAL DICTIONARY (EN/VI)
@@ -289,11 +298,15 @@ const MEDICAL_SOURCES: Record<string, { sources: string[]; confidence: string }>
 
 export default function MEDIagentApp() {
   // Global Language state
-  const [lang, setLang] = useState<'vi' | 'en'>('vi');
+  const [lang, setLang] = useState<Lang>('vi');
+  const [lastUserQuery, setLastUserQuery] = useState('');
+  const [tooltipStep, setTooltipStep] = useState(0);
+  const [showTooltip, setShowTooltip] = useState(true);
+  const { speak, stop: stopSpeak, isSpeaking } = useSpeechOutput({ lang: lang === 'vi' ? 'vi-VN' : 'en-US' });
 
-  // Translation helper
-  const t = (key: keyof typeof TRANSLATIONS['vi']) => {
-    return TRANSLATIONS[lang][key] || TRANSLATIONS['vi'][key] || String(key);
+  const t = (key: TranslationKey | keyof typeof TRANSLATIONS['vi']): string => {
+    const table = TRANSLATIONS[lang] as Record<string, string>;
+    return table[key as string] || TRANSLATIONS['vi'][key as keyof typeof TRANSLATIONS['vi']] || String(key);
   };
 
   // Global UI states
@@ -307,7 +320,7 @@ export default function MEDIagentApp() {
   ]);
 
   // Auth Store
-  const { isAuthenticated, userName, userCccd, role, login, logout } = useAuthStore();
+  const { isAuthenticated, userName, userCccd, role, token, login, logout } = useAuthStore();
   
   // Login/Register forms
   const [isSignUp, setIsSignUp] = useState(false);
@@ -318,7 +331,10 @@ export default function MEDIagentApp() {
   const [inputDocSpecialty, setInputDocSpecialty] = useState('Khoa Tim Mạch');
 
   // Encryption Key
-  const secretKey = mediagentApiKey || 'mediagent-default-secret-key-32-chars';
+  const secretKey =
+    mediagentApiKey ||
+    (typeof process !== 'undefined' && process.env ? process.env.NEXT_PUBLIC_CRYPTO_SECRET : '') ||
+    'mediagent-default-secret-key-32-chars';
 
   // Live Event Log Helper
   const addDevLog = (log: string) => {
@@ -400,25 +416,16 @@ export default function MEDIagentApp() {
   }, [chatMessages]);
   // Load IndexedDB messages for Patient and Doctor on mount/session changes
   useEffect(() => {
-    const loadCachedMessages = async () => {
-      try {
-        const cached = await getMessagesFromDB(userCccd || 'guest');
-        if (cached && cached.length > 0) {
-          setChatMessages(cached);
-          addDevLog(`[secureDb.ts] Loaded ${cached.length} cached chat messages from IndexedDB.`);
-        } else {
-          setChatMessages([]);
-        }
-      } catch (err) {
-        console.error('Failed to load from IndexedDB', err);
+    const loadCached = async () => {
+      if (!isAuthenticated || !userCccd || !token) {
+        setChatMessages([]);
+        return;
       }
+      const msgs = await loadChatHistory(token, userCccd, userCccd);
+      if (msgs.length) setChatMessages(msgs);
     };
-    if (isAuthenticated) {
-      loadCachedMessages();
-    } else {
-      setChatMessages([]);
-    }
-  }, [isAuthenticated, userCccd]);
+    loadCached();
+  }, [isAuthenticated, userCccd, token]);
   // Pre-fill health stats if in localstorage
   useEffect(() => {
     if (isAuthenticated && role === 'patient') {
@@ -621,6 +628,7 @@ export default function MEDIagentApp() {
     if (!chatInputText.trim() || chatLoading) return;
 
     const userText = chatInputText;
+    setLastUserQuery(userText);
     setChatInputText('');
     if (chatInputRef.current) chatInputRef.current.style.height = 'auto';
 
@@ -644,8 +652,10 @@ export default function MEDIagentApp() {
       };
       
       setChatMessages(prev => [...prev, userMsg, assistantMsg]);
-      await saveMessageToDB(userMsg, activeUserKey);
-      await saveMessageToDB(assistantMsg, activeUserKey);
+      if (token) {
+        await syncMessageToServer(token, activeUserKey, activeUserKey, userMsg);
+        await syncMessageToServer(token, activeUserKey, activeUserKey, assistantMsg);
+      }
       return;
     }
 
@@ -675,7 +685,7 @@ export default function MEDIagentApp() {
     ];
     
     setChatMessages(prev => [...prev, userMsg]);
-    await saveMessageToDB(userMsg, activeUserKey);
+    if (token) await syncMessageToServer(token, activeUserKey, activeUserKey, userMsg);
 
     const matchedDept = matchDepartment(userText);
     const assistantMsgId = crypto.randomUUID();
@@ -758,9 +768,9 @@ export default function MEDIagentApp() {
           msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg
         );
         const savedAssistant = finalMsgs.find(m => m.id === assistantMsgId);
-        if (savedAssistant) {
-          saveMessageToDB(savedAssistant, activeUserKey);
-          addDevLog(`[secureDb.ts] Caching chat thread payload to encrypted IndexedDB...`);
+        if (savedAssistant && token) {
+          syncMessageToServer(token, activeUserKey, activeUserKey, savedAssistant);
+          addDevLog(`[chat/sync] Cached to IndexedDB + server.`);
         }
         return finalMsgs;
       });
@@ -1470,216 +1480,34 @@ export default function MEDIagentApp() {
                         
                         {/* PANEL 1: AI CLINICAL CONSULTATION CHATBOT */}
                         {patientTab === 'chatbot' && (
-                          <div className="flex-1 flex flex-col overflow-hidden">
-                            {/* Message Timeline */}
-                            <div 
-                              ref={chatScrollRef}
-                              className="flex-1 overflow-y-auto px-6 py-6 space-y-6 scrollbar-thin scrollbar-thumb-[#1c2e24] scrollbar-track-transparent"
-                            >
-                              {chatMessages.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto space-y-6">
-                                  <div className="rounded-full bg-[#0f1712] p-6 border border-[#1c2e24] text-[#7FB08E] animate-pulse">
-                                    <Activity className="h-10 w-10" />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <h3 className="text-lg font-bold text-slate-200">{t('assistantTitle')}</h3>
-                                    <p className="text-xs text-slate-400 leading-relaxed font-sans">
-                                      {t('chatbotIntro')}
-                                    </p>
-                                  </div>
-
-                                  {/* Symptom Presets */}
-                                  <div className="w-full space-y-2 pt-2 font-sans">
-                                    <div className="text-xxs font-bold text-slate-500 uppercase tracking-widest text-left pl-1">{t('emergencyPresets')}</div>
-                                    <button
-                                      onClick={() => handleTriggerPreset(lang === 'vi' ? 'Tôi bị đau ngực trái lan ra cánh tay trái, khó thở dữ dội từ 15 phút trước.' : 'I have severe left chest pain spreading to my left arm, difficulty breathing since 15 mins.')}
-                                      className="w-full flex items-center justify-between text-left p-3.5 rounded-2xl bg-[#0f1712]/50 hover:bg-[#0f1712] border border-red-500/20 text-red-300 text-xs font-semibold transition-all"
-                                    >
-                                      <span>{t('emergencyPreset1')}</span>
-                                      <AlertCircle className="h-4 w-4 text-red-400" />
-                                    </button>
-                                    <button
-                                      onClick={() => handleTriggerPreset(lang === 'vi' ? 'Tôi bị ngứa da nổi mụn nước ở bắp chân đã 3 ngày nay.' : 'I have itchy skin blisters on my calf for 3 days.')}
-                                      className="w-full flex items-center justify-between text-left p-3.5 rounded-2xl bg-[#0f1712]/50 hover:bg-[#0f1712] border border-[#1c2e24] text-slate-300 text-xs font-semibold transition-all"
-                                    >
-                                      <span>{t('emergencyPreset2')}</span>
-                                      <ChevronRight className="h-4 w-4 text-slate-500" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="max-w-3xl mx-auto space-y-6 font-sans">
-                                  {chatMessages.map((msg) => {
-                                    const isUser = msg.role === 'user';
-                                    const isClean = typeof window !== 'undefined' ? DOMPurify.sanitize(msg.content) : msg.content;
-                                    
-                                    const deptKey = msg.departmentToSchedule || 'default';
-                                    const sourceData = MEDICAL_SOURCES[deptKey] || MEDICAL_SOURCES['default'];
-
-                                    return (
-                                      <div key={msg.id} className="space-y-2">
-                                        <div
-                                          role="log"
-                                          className={`flex w-full gap-4 py-4 px-4 rounded-2xl transition-all border ${
-                                            isUser ? 'bg-transparent border-transparent' : 'bg-[#0f1712]/45 border-[#1c2e24]/40'
-                                          }`}
-                                        >
-                                          <div
-                                            className={`flex h-10 w-10 shrink-0 select-none items-center justify-center rounded-xl shadow-md ${
-                                              isUser
-                                                ? 'bg-[#4d7c5d]/10 text-[#7FB08E] border border-[#4d7c5d]/20'
-                                                : 'bg-[#3d634a]/20 text-[#7FB08E] border border-[#4d7c5d]/20'
-                                            }`}
-                                          >
-                                            {isUser ? <User className="h-5 w-5" /> : <Activity className="h-5 w-5" />}
-                                          </div>
-
-                                          <div className="flex-1 space-y-1.5">
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-xxs font-bold text-slate-500 uppercase tracking-wide">
-                                                {isUser ? (lang === 'vi' ? 'Bệnh Nhân (Khóa PII mask active)' : 'Patient (PII mask active)') : 'CareAgent Trợ Lý AI'}
-                                              </span>
-                                              {isUser && (
-                                                <span className="text-[9px] text-[#7FB08E] bg-[#14231b]/60 px-1.5 py-0.5 rounded font-mono flex items-center gap-1 border border-[#4d7c5d]/20">
-                                                  <Shield className="w-2.5 h-2.5" />
-                                                  {t('clientMaskedBadge')}
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div 
-                                              aria-live={msg.isStreaming ? 'polite' : 'off'} 
-                                              className="text-slate-100 text-sm leading-relaxed break-words whitespace-pre-wrap font-sans"
-                                              dangerouslySetInnerHTML={{ __html: isClean || (lang === 'vi' ? 'Đang tạo chẩn đoán phân khoa...' : 'Generating clinical response...') }}
-                                            />
-
-                                            {/* Dynamic Scheduling Card Render inside chat */}
-                                            {!msg.isStreaming && msg.departmentToSchedule && (
-                                              <div className="mt-3 p-4 bg-[#0f1712] border border-[#1c2e24] rounded-2xl max-w-md space-y-3 shadow-xl">
-                                                <div className="flex items-center gap-2">
-                                                  <Calendar className="w-4 h-4 text-[#7FB08E]" />
-                                                  <span className="text-xs font-bold text-slate-200">{t('suggestedBooking')}</span>
-                                                </div>
-                                                <p className="text-[10px] text-slate-400">{t('suggestedBookingSub')} <strong>{msg.departmentToSchedule}</strong></p>
-                                                <button
-                                                  onClick={() => {
-                                                    setBookingDept(msg.departmentToSchedule!);
-                                                    setPatientTab('booking');
-                                                    addDevLog(`[Router] Redirected to secure booking for department: ${msg.departmentToSchedule}`);
-                                                  }}
-                                                  className="w-full bg-[#4d7c5d] hover:bg-[#5e8c6a] text-white font-bold text-xs py-2 rounded-xl transition-all shadow"
-                                                >
-                                                  {t('bookNowBtn')}
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        {/* CLINICAL CONFIDENCE & MEDICAL EVIDENCE CARD */}
-                                        {!isUser && !msg.isStreaming && msg.content && (
-                                          <div className="ml-14 max-w-2xl bg-[#070b09]/80 border border-[#111a14] rounded-2xl p-4 space-y-3 shadow-sm font-sans">
-                                            <div className="flex items-center justify-between border-b border-[#1c2e24] pb-2">
-                                              <div className="flex items-center gap-2 text-xxs font-bold text-slate-400 uppercase tracking-widest">
-                                                <Award className="w-3.5 h-3.5 text-[#7FB08E] animate-pulse" />
-                                                <span>{t('confidenceTitle')}</span>
-                                              </div>
-                                              <span className="text-xs font-bold text-[#7FB08E] font-mono">
-                                                {sourceData.confidence}
-                                              </span>
-                                            </div>
-
-                                            {/* Confidence gauge progress bar */}
-                                            <div className="h-1.5 w-full bg-[#0f1712] rounded-full overflow-hidden">
-                                              <div 
-                                                className="h-full bg-gradient-to-r from-[#4d7c5d] to-[#7FB08E] rounded-full"
-                                                style={{ width: sourceData.confidence }}
-                                              />
-                                            </div>
-
-                                            <div className="space-y-1">
-                                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">
-                                                {t('evidenceLabel')}:
-                                              </span>
-                                              <ul className="text-[10px] text-slate-400 space-y-1 list-disc pl-4">
-                                                {sourceData.sources.map((src, sIdx) => (
-                                                  <li key={sIdx}>{src}</li>
-                                                ))}
-                                              </ul>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Emergency Warning Card */}
-                                  {isEmergency && (
-                                    <div 
-                                      aria-live="assertive"
-                                      className="border border-red-500/30 bg-red-950/20 p-5 rounded-2xl flex gap-3 text-red-200 shadow-lg relative overflow-hidden animate-pulse animate-scaleIn"
-                                    >
-                                      <div className="absolute top-0 right-0 w-24 h-24 bg-red-500/5 rounded-full blur-xl pointer-events-none" />
-                                      <AlertCircle className="w-6 h-6 text-red-400 shrink-0 mt-0.5 animate-bounce" />
-                                      <div className="space-y-1.5">
-                                        <h4 className="font-extrabold text-sm text-red-400 tracking-wide uppercase">{t('emergencyWarningTitle')}</h4>
-                                        <p className="text-xs leading-relaxed text-slate-300">
-                                          {t('emergencyWarningText')}
-                                        </p>
-                                        <div className="pt-1 flex gap-2">
-                                          <a 
-                                            href="tel:115"
-                                            className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow-md transition-all"
-                                          >
-                                            {t('call115')}
-                                          </a>
-                                          <button
-                                            onClick={() => setIsEmergency(false)}
-                                            className="px-3 py-1.5 border border-[#1c2e24] text-slate-400 hover:text-slate-300 text-xs rounded-xl transition-all"
-                                          >
-                                            {t('closeWarning')}
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Footer Input Area */}
-                            <footer className="shrink-0 border-t border-[#111a14] bg-[#070b09] p-4">
-                              <div className="max-w-3xl mx-auto">
-                                <form onSubmit={handleChatSubmit} className="relative flex items-end gap-2 bg-[#0f1712]/60 border border-[#1c2e24] rounded-2xl p-2 focus-within:ring-2 focus-within:ring-[#4d7c5d]/50 transition-all">
-                                  <textarea
-                                    ref={chatInputRef}
-                                    rows={1}
-                                    value={chatInputText}
-                                    onChange={handleInputChange}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter' && !e.shiftKey) {
-                                        e.preventDefault();
-                                        handleChatSubmit();
-                                      }
-                                    }}
-                                    placeholder={t('symptomPlaceholderText')}
-                                    aria-label="Khung nhập nội dung tư vấn triệu chứng"
-                                    className="flex-1 max-h-24 min-h-[2.5rem] bg-transparent pl-3 pr-12 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none resize-none overflow-y-auto"
-                                  />
-                                  <button
-                                    type="submit"
-                                    disabled={chatLoading || !chatInputText.trim()}
-                                    aria-label="Gửi tin nhắn"
-                                    className="absolute right-3 bottom-3 flex h-9 w-9 items-center justify-center rounded-xl bg-[#4d7c5d] text-white shadow hover:bg-[#5e8c6a] disabled:bg-slate-800 disabled:text-slate-600 transition-all"
-                                  >
-                                    <Send className="h-4 w-4" />
-                                  </button>
-                                </form>
-                                <div className="mt-2 text-center text-[9px] text-slate-600 font-sans">
-                                  * Khuyến cáo: Trợ lý AI chỉ mang tính chất tham khảo lâm sàng sơ bộ, không thay thế chẩn đoán của bác sĩ.
-                                </div>
-                              </div>
-                            </footer>
-                          </div>
+                          <>
+                            <ChatUI
+                              lang={lang}
+                              t={t as (key: TranslationKey) => string}
+                              messages={chatMessages}
+                              chatInputText={chatInputText}
+                              chatLoading={chatLoading}
+                              isEmergency={isEmergency}
+                              lastUserQuery={lastUserQuery}
+                              chatScrollRef={chatScrollRef}
+                              chatInputRef={chatInputRef}
+                              onInputChange={handleInputChange}
+                              onSubmit={handleChatSubmit}
+                              onPreset={handleTriggerPreset}
+                              onBookDept={(dept) => {
+                                setBookingDept(dept);
+                                setPatientTab('booking');
+                              }}
+                              onDismissEmergency={() => setIsEmergency(false)}
+                              onSpeak={(text) => speak(text, CONFIDENCE_STRIP_PATTERNS)}
+                              onStopSpeak={stopSpeak}
+                              isSpeaking={isSpeaking}
+                              onVoiceResult={(text) => setChatInputText((prev) => (prev ? prev + ' ' + text : text))}
+                            />
+                            {showTooltip && onboardingCompleted && (
+                              <OnboardingTooltip lang={lang} step={tooltipStep} onDismiss={() => { setShowTooltip(false); setTooltipStep((s) => Math.min(s + 1, 2)); }} />
+                            )}
+                          </>
                         )}
 
                         {/* PANEL 2: SECURE APPOINTMENT BOOKING FORM */}
