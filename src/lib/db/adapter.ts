@@ -1,6 +1,17 @@
 import { Pool, type QueryResultRow } from 'pg';
 import { getSqliteDb } from '@/lib/db/sqlite';
 
+export function buildPostgresPoolConfig(connectionString: string) {
+  const ssl = /neon|supabase/i.test(connectionString)
+    ? { rejectUnauthorized: false }
+    : undefined;
+
+  return {
+    connectionString,
+    ...(ssl ? { ssl } : {}),
+  };
+}
+
 export interface DatabaseAdapter {
   getBackendName(): 'sqlite' | 'postgres';
   get<T = unknown>(query: string, params?: unknown[]): Promise<T | undefined>;
@@ -41,7 +52,8 @@ class PostgresAdapter implements DatabaseAdapter {
 
   private getPool(): Pool {
     if (!this.pool) {
-      this.pool = new Pool({ connectionString: process.env.MANAGED_DATABASE_URL });
+      const connectionString = process.env.MANAGED_DATABASE_URL;
+      this.pool = new Pool(connectionString ? buildPostgresPoolConfig(connectionString) : { connectionString: '' });
     }
     return this.pool;
   }

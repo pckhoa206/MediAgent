@@ -10,7 +10,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate:db": "tsx scripts/migrate-db.ts",
+    "seed:db": "tsx scripts/seed-db.ts"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -39,6 +41,7 @@
     "eslint-config-next": "16.2.9",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.0",
     "typescript": "^5",
     "vitest": "^4.1.9"
   }
