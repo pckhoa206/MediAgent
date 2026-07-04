@@ -47,8 +47,8 @@ import { PatientSidebar } from '@/components/shell/PatientSidebar';
 import { ChatUI } from '@/components/chat/ChatUI';
 import { AuthPortal } from '@/components/auth/AuthPortal';
 import { OnboardingTooltip } from '@/components/onboarding/OnboardingTooltip';
-import { syncMessageToServer, loadChatHistory } from '@/modules/chat/sync';
-import { createSecureBooking, fetchAppointments, completeAppointment } from '@/modules/booking/service';
+import { syncMessageToServer, loadChatHistory, deleteLocalChatSession } from '@/modules/chat/sync';
+import { createSecureBooking, fetchAppointments, completeAppointment, cancelAppointmentOnServer } from '@/modules/booking/service';
 import { submitEMR } from '@/modules/emr/service';
 import { useSpeechOutput, CONFIDENCE_STRIP_PATTERNS } from '@/hooks/useSpeechOutput';
 
@@ -358,11 +358,85 @@ export default function MEDIagentApp() {
 
   // Chat States (Patient view)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatSessions, setChatSessions] = useState<string[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string>('');
   const [chatInputText, setChatInputText] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [isEmergency, setIsEmergency] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const refreshSessions = async (activeSessionToSet?: string) => {
+    if (!token || !userCccd) return;
+    try {
+      const res = await fetch('/api/chat/messages?listSessions=true', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const sessList = data.sessions || [];
+        setChatSessions(sessList);
+        
+        let targetSession: string = activeSessionToSet || '';
+        if (!targetSession) {
+          if (sessList.length > 0) {
+            targetSession = sessList[0] || `chat-${Date.now()}`;
+          } else {
+            targetSession = `chat-${Date.now()}`;
+          }
+        }
+        
+        setActiveChatSessionId(targetSession);
+        const msgs = await loadChatHistory(token, userCccd, targetSession);
+        setChatMessages(msgs);
+      }
+    } catch (e) {
+      console.error("Failed to load sessions", e);
+    }
+  };
+
+  const handleSelectChatSession = async (sessionId: string) => {
+    if (!token || !userCccd) return;
+    setActiveChatSessionId(sessionId);
+    const msgs = await loadChatHistory(token, userCccd, sessionId);
+    setChatMessages(msgs);
+  };
+
+  const handleCreateChatSession = () => {
+    const newSessionId = `chat-${Date.now()}`;
+    setActiveChatSessionId(newSessionId);
+    setChatSessions(prev => [newSessionId, ...prev]);
+    setChatMessages([]);
+  };
+
+  const handleDeleteChatSession = async (sessionId: string) => {
+    const activeUser = userCccd || 'guest';
+    try {
+      if (token && userCccd) {
+        await fetch(`/api/chat/messages?sessionId=${sessionId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      }
+      await deleteLocalChatSession(activeUser, sessionId);
+      const updatedList = chatSessions.filter(s => s !== sessionId);
+      setChatSessions(updatedList);
+      
+      if (activeChatSessionId === sessionId) {
+        let nextSession = updatedList[0];
+        if (!nextSession) {
+          nextSession = `chat-${Date.now()}`;
+          setChatSessions([nextSession]);
+          setChatMessages([]);
+          setActiveChatSessionId(nextSession);
+        } else {
+          handleSelectChatSession(nextSession);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to delete session", e);
+    }
+  };
 
   // Secure Booking Form States
   const [bookingName, setBookingName] = useState('');
@@ -394,7 +468,7 @@ export default function MEDIagentApp() {
   const { status: syncStatus, lastMessage } = useRealtimeSync();
 
   // Calendar Store
-  const { slots, appointments, bookAppointment, cancelAppointment } = useCalendarStore();
+  const { slots, appointments, bookAppointment, cancelAppointment, setAppointments } = useCalendarStore();
   const activeQueue = appointments.filter(apt => apt.status === 'BOOKED');
 
   // Type Casting Department Evaluator
@@ -414,18 +488,68 @@ export default function MEDIagentApp() {
       });
     }
   }, [chatMessages]);
-  // Load IndexedDB messages for Patient and Doctor on mount/session changes
+  // Load IndexedDB messages and session lists for Patient and Doctor on mount/session changes
   useEffect(() => {
-    const loadCached = async () => {
-      if (!isAuthenticated || !userCccd || !token) {
+    const syncData = async () => {
+      if (isAuthenticated && userCccd && token) {
+        // 1. Refresh chat sessions
+        await refreshSessions();
+        
+        // 2. Sync appointments from server database
+        try {
+          const dbAppointments = await fetchAppointments(token);
+          if (role === 'patient') {
+            const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+              ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+              : 'mediagent-default-secret-key-32-chars';
+            const secretKey = `${baseSecret}_${userCccd}`;
+            
+            const decryptedAppointments = await Promise.all(
+              dbAppointments.map(async (apt) => {
+                let decryptedName = apt.patientName;
+                let decryptedCccd = apt.patientCccd;
+                try {
+                  decryptedName = await decryptData(apt.patientName, secretKey);
+                  decryptedCccd = await decryptData(apt.patientCccd, secretKey);
+                } catch (e) {
+                  // Ignore decryption errors for mismatch
+                }
+                return {
+                  id: apt.id,
+                  patientCccd: decryptedCccd,
+                  patientName: decryptedName,
+                  department: apt.department,
+                  slot: apt.slot,
+                  doctorId: apt.doctorId,
+                  status: apt.status as 'BOOKED' | 'CANCELLED'
+                };
+              })
+            );
+            setAppointments(decryptedAppointments);
+          } else if (role === 'doctor') {
+            const mappedAppointments = dbAppointments.map((apt) => ({
+              id: apt.id,
+              patientCccd: apt.patientCccd,
+              patientName: apt.patientName,
+              department: apt.department,
+              slot: apt.slot,
+              doctorId: apt.doctorId,
+              status: apt.status as 'BOOKED' | 'CANCELLED'
+            }));
+            setAppointments(mappedAppointments);
+          }
+        } catch (e) {
+          console.error("Failed to sync appointments from database:", e);
+        }
+      } else {
         setChatMessages([]);
-        return;
+        setChatSessions([]);
+        setActiveChatSessionId('');
       }
-      const msgs = await loadChatHistory(token, userCccd, userCccd);
-      if (msgs.length) setChatMessages(msgs);
     };
-    loadCached();
-  }, [isAuthenticated, userCccd, token]);
+    
+    syncData();
+  }, [isAuthenticated, userCccd, token, role]);
   // Pre-fill health stats if in localstorage
   useEffect(() => {
     if (isAuthenticated && role === 'patient') {
@@ -461,7 +585,10 @@ export default function MEDIagentApp() {
   // -------------------------------------------------------------
   // SIGN UP / ACCOUNT REGISTRATION LOGIC WITH STRICT DOCTOR ID CHECK
   // -------------------------------------------------------------
-  const handleSignUpSubmit = (e: React.FormEvent) => {
+  // -------------------------------------------------------------
+  // SIGN UP / ACCOUNT REGISTRATION LOGIC WITH STRICT DOCTOR ID CHECK
+  // -------------------------------------------------------------
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loginRole === 'doctor') {
       if (!inputName.trim() || !inputDocId.trim()) {
@@ -469,14 +596,32 @@ export default function MEDIagentApp() {
         return;
       }
       
-      // STRICT CHECK: Reject if Doctor ID does not exist in valid system database
       if (!VALID_DOCTOR_IDS.includes(inputDocId.trim())) {
-        const errorMsg = lang === 'vi' 
-          ? `Mã bác sĩ '${inputDocId}' không tồn tại hoặc không khớp trên Cơ sở dữ liệu Y khoa Quốc gia!` 
-          : `Doctor ID '${inputDocId}' does not exist or matches in the National Medical Database!`;
-        alert(errorMsg);
-        addDevLog(`[Auth Error] Registration failed: Doctor ID '${inputDocId}' is invalid.`);
+        alert(lang === 'vi' 
+          ? `Mã bác sĩ '${inputDocId}' không tồn tại hoặc không khớp!` 
+          : `Doctor ID '${inputDocId}' does not exist!`
+        );
         return;
+      }
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cccd: 'DOC-' + inputDocId.trim(),
+            password: 'CareAgent@2026',
+            role: 'doctor',
+            fullName: inputName,
+            doctorId: inputDocId.trim()
+          })
+        });
+        if (!res.ok && res.status !== 409) {
+          const data = await res.json();
+          throw new Error(data.message);
+        }
+      } catch (err: any) {
+        console.error("Server registration failed", err);
       }
 
       const doctorsRaw = localStorage.getItem('registered_doctors') || '{}';
@@ -486,7 +631,6 @@ export default function MEDIagentApp() {
         specialty: inputDocSpecialty
       };
       localStorage.setItem('registered_doctors', JSON.stringify(doctors));
-      addDevLog(`[Auth] Registered doctor: ${inputName} (ID: ${inputDocId}) in Specialty: ${inputDocSpecialty}`);
       alert(t('registerSuccess'));
       setIsSignUp(false);
     } else {
@@ -495,7 +639,6 @@ export default function MEDIagentApp() {
         return;
       }
 
-      // CCCD Validation: Must be exactly 12 digits
       const cccdRegex = /^[0-9]{12}$/;
       if (!cccdRegex.test(inputCccd.trim())) {
         alert(lang === 'vi' 
@@ -505,22 +648,40 @@ export default function MEDIagentApp() {
         return;
       }
 
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cccd: inputCccd.trim(),
+            password: 'CareAgent@2026',
+            role: 'patient',
+            fullName: inputName
+          })
+        });
+        if (!res.ok && res.status !== 409) {
+          const data = await res.json();
+          throw new Error(data.message);
+        }
+      } catch (err: any) {
+        console.error("Server registration failed", err);
+      }
+
       const patientsRaw = localStorage.getItem('registered_patients') || '{}';
       const patients = JSON.parse(patientsRaw);
       patients[inputCccd] = {
         name: inputName
       };
       localStorage.setItem('registered_patients', JSON.stringify(patients));
-      addDevLog(`[Auth] Registered patient: ${inputName} with CCCD: ${inputCccd.substring(0, 4)}****`);
       alert(t('registerSuccess'));
       setIsSignUp(false);
     }
   };
 
   // -------------------------------------------------------------
-  // SIGN IN LOGIC (VERIFY REGISTERED ACCOUNTS)
+  // SIGN IN LOGIC (VERIFY REGISTERED ACCOUNTS WITH SELF-HEALING SERVER SYNC)
   // -------------------------------------------------------------
-  const handleSignInSubmit = (e: React.FormEvent) => {
+  const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loginRole === 'doctor') {
       if (!inputName.trim() || !inputDocId.trim()) {
@@ -528,10 +689,59 @@ export default function MEDIagentApp() {
         return;
       }
       
+      const docCccd = 'DOC-' + inputDocId.trim();
+      try {
+        let res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cccd: docCccd, password: '123456', role: 'doctor' })
+        });
+        if (!res.ok) {
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cccd: docCccd, password: 'CareAgent@2026', role: 'doctor' })
+          });
+        }
+        if (!res.ok) {
+          // Self-heal: auto register on server
+          await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cccd: docCccd,
+              password: 'CareAgent@2026',
+              role: 'doctor',
+              fullName: inputName,
+              doctorId: inputDocId.trim()
+            })
+          });
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cccd: docCccd, password: 'CareAgent@2026', role: 'doctor' })
+          });
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          setChatMessages([]);
+          login({
+            cccd: docCccd,
+            role: 'doctor',
+            doctorId: inputDocId.trim(),
+            userName: data.user?.userName || inputName,
+            token: data.token
+          });
+          addDevLog(`[Auth] Doctor ${inputName} logged in (Server authenticated).`);
+          return;
+        }
+      } catch (err) {
+        console.error("Server doctor login failed, falling back to mock", err);
+      }
+
       const doctorsRaw = localStorage.getItem('registered_doctors') || '{}';
       const doctors = JSON.parse(doctorsRaw);
-      
-      // STRICT CHECK: Verify Doctor exists and credentials match
       if (!doctors[inputDocId] || doctors[inputDocId].name.toLowerCase() !== inputName.toLowerCase()) {
         alert(lang === 'vi' 
           ? 'Tài khoản Bác sĩ không tồn tại hoặc thông tin đăng nhập không chính xác! Vui lòng đăng ký trước.' 
@@ -541,11 +751,11 @@ export default function MEDIagentApp() {
         return;
       }
       
-      setChatMessages([]); // Clear previous chat state synchronously
+      setChatMessages([]);
       login({
-        cccd: 'DOC-' + inputDocId,
+        cccd: docCccd,
         role: 'doctor',
-        doctorId: inputDocId,
+        doctorId: inputDocId.trim(),
         userName: inputName,
         token: 'doctor-session-token-' + Math.random().toString(36).substr(2, 9)
       });
@@ -556,7 +766,6 @@ export default function MEDIagentApp() {
         return;
       }
 
-      // CCCD Validation: Must be exactly 12 digits
       const cccdRegex = /^[0-9]{12}$/;
       if (!cccdRegex.test(inputCccd.trim())) {
         alert(lang === 'vi' 
@@ -566,10 +775,56 @@ export default function MEDIagentApp() {
         return;
       }
 
+      try {
+        let res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cccd: inputCccd.trim(), password: '123456', role: 'patient' })
+        });
+        if (!res.ok) {
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cccd: inputCccd.trim(), password: 'CareAgent@2026', role: 'patient' })
+          });
+        }
+        if (!res.ok) {
+          // Self-heal: auto register on server
+          await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cccd: inputCccd.trim(),
+              password: 'CareAgent@2026',
+              role: 'patient',
+              fullName: inputName
+            })
+          });
+          res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cccd: inputCccd.trim(), password: 'CareAgent@2026', role: 'patient' })
+          });
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          setChatMessages([]);
+          login({
+            cccd: inputCccd.trim(),
+            role: 'patient',
+            userName: data.user?.userName || inputName,
+            token: data.token
+          });
+          addDevLog(`[Auth] Patient ${inputName} logged in (Server authenticated).`);
+          return;
+        }
+      } catch (err) {
+        console.error("Server patient login failed, falling back to mock", err);
+      }
+
       const patientsRaw = localStorage.getItem('registered_patients') || '{}';
       const patients = JSON.parse(patientsRaw);
-      
-      // STRICT CHECK: Verify Patient exists and credentials match
       if (!patients[inputCccd] || patients[inputCccd].name.toLowerCase() !== inputName.toLowerCase()) {
         alert(lang === 'vi' 
           ? 'Tài khoản người bệnh không tồn tại hoặc thông tin đăng nhập không chính xác! Vui lòng đăng ký trước.' 
@@ -579,9 +834,9 @@ export default function MEDIagentApp() {
         return;
       }
 
-      setChatMessages([]); // Clear previous chat state synchronously
+      setChatMessages([]);
       login({
-        cccd: inputCccd,
+        cccd: inputCccd.trim(),
         role: 'patient',
         userName: inputName,
         token: 'patient-session-token-' + Math.random().toString(36).substr(2, 9)
@@ -653,8 +908,8 @@ export default function MEDIagentApp() {
       
       setChatMessages(prev => [...prev, userMsg, assistantMsg]);
       if (token) {
-        await syncMessageToServer(token, activeUserKey, activeUserKey, userMsg);
-        await syncMessageToServer(token, activeUserKey, activeUserKey, assistantMsg);
+        await syncMessageToServer(token, activeUserKey, activeChatSessionId || activeUserKey, userMsg);
+        await syncMessageToServer(token, activeUserKey, activeChatSessionId || activeUserKey, assistantMsg);
       }
       return;
     }
@@ -685,7 +940,7 @@ export default function MEDIagentApp() {
     ];
     
     setChatMessages(prev => [...prev, userMsg]);
-    if (token) await syncMessageToServer(token, activeUserKey, activeUserKey, userMsg);
+    if (token) await syncMessageToServer(token, activeUserKey, activeChatSessionId || activeUserKey, userMsg);
 
     const matchedDept = matchDepartment(userText);
     const assistantMsgId = crypto.randomUUID();
@@ -710,7 +965,7 @@ export default function MEDIagentApp() {
         body: JSON.stringify({
           message: maskedText,
           history: historyPayload,
-          sessionId: activeUserKey,
+          sessionId: activeChatSessionId || activeUserKey,
           customApiKey: mediagentApiKey || undefined
         }),
       });
@@ -755,6 +1010,27 @@ export default function MEDIagentApp() {
                 if (parsed.status === 'EMERGENCY') {
                   setIsEmergency(true);
                 }
+              } else if (parsed.type === 'appointment_booked') {
+                const newApt = parsed.appointment;
+                if (newApt) {
+                  useCalendarStore.setState(state => {
+                    const updatedSlots = state.slots.map(s => 
+                      s.id === newApt.slotId ? { ...s, isBooked: true } : s
+                    );
+                    return {
+                      slots: updatedSlots,
+                      appointments: [...state.appointments, {
+                        id: newApt.id,
+                        patientCccd: newApt.patientCccd,
+                        patientName: newApt.patientName,
+                        department: newApt.department,
+                        slot: newApt.slot,
+                        doctorId: newApt.doctorId,
+                        status: newApt.status
+                      }]
+                    };
+                  });
+                }
               }
             } catch (err) {
               // Ignore partial JSON parsing errors
@@ -765,12 +1041,19 @@ export default function MEDIagentApp() {
 
       setChatMessages(prev => {
         const finalMsgs = prev.map(msg => 
-          msg.id === assistantMsgId ? { ...msg, isStreaming: false } : msg
+          msg.id === assistantMsgId 
+            ? { 
+                ...msg, 
+                content: msg.content || 'Đã xảy ra lỗi kết nối hoặc hết hạn ngạch API. Vui lòng kiểm tra lại cấu hình.', 
+                isStreaming: false 
+              } 
+            : msg
         );
         const savedAssistant = finalMsgs.find(m => m.id === assistantMsgId);
         if (savedAssistant && token) {
-          syncMessageToServer(token, activeUserKey, activeUserKey, savedAssistant);
+          syncMessageToServer(token, activeUserKey, activeChatSessionId || activeUserKey, savedAssistant);
           addDevLog(`[chat/sync] Cached to IndexedDB + server.`);
+          refreshSessions(activeChatSessionId);
         }
         return finalMsgs;
       });
@@ -1503,6 +1786,11 @@ export default function MEDIagentApp() {
                               onStopSpeak={stopSpeak}
                               isSpeaking={isSpeaking}
                               onVoiceResult={(text) => setChatInputText((prev) => (prev ? prev + ' ' + text : text))}
+                              sessions={chatSessions}
+                              activeSessionId={activeChatSessionId}
+                              onSelectSession={handleSelectChatSession}
+                              onCreateSession={handleCreateChatSession}
+                              onDeleteSession={handleDeleteChatSession}
                             />
                             {showTooltip && onboardingCompleted && (
                               <OnboardingTooltip lang={lang} step={tooltipStep} onDismiss={() => { setShowTooltip(false); setTooltipStep((s) => Math.min(s + 1, 2)); }} />
@@ -1651,9 +1939,19 @@ export default function MEDIagentApp() {
                                           </div>
                                           {apt.status === 'BOOKED' && (
                                             <button
-                                              onClick={() => {
-                                                cancelAppointment('patient', userCccd || '', apt.id);
-                                                addDevLog(`[Store] Appointment cancelled by patient.`);
+                                              onClick={async () => {
+                                                if (window.confirm(lang === 'vi' ? 'Bạn có chắc chắn muốn hủy lịch hẹn này?' : 'Are you sure you want to cancel this appointment?')) {
+                                                  cancelAppointment('patient', userCccd || '', apt.id);
+                                                  addDevLog(`[Store] Appointment cancelled by patient.`);
+                                                  if (token) {
+                                                    try {
+                                                      await cancelAppointmentOnServer(token, apt.id);
+                                                      addDevLog(`[API] Cancelled appointment on server.`);
+                                                    } catch (e) {
+                                                      console.error("Failed to cancel appointment on server", e);
+                                                    }
+                                                  }
+                                                }
                                               }}
                                               className="absolute right-2.5 bottom-2.5 text-red-400 hover:text-red-300 p-1"
                                               title="Hủy lịch hẹn"

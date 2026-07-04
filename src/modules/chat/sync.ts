@@ -1,6 +1,10 @@
 import type { ChatMessageRecord } from '@/types';
-import { saveMessageToDB, getMessagesFromDB } from '@/lib/secureDb';
+import { saveMessageToDB, getMessagesFromDB, deleteSessionFromDB } from '@/lib/secureDb';
 import type { ChatMessage } from '@/store/useChatStore';
+
+export async function deleteLocalChatSession(userId: string, sessionId: string): Promise<void> {
+  await deleteSessionFromDB(userId, sessionId);
+}
 
 export async function syncMessageToServer(
   token: string,
@@ -8,7 +12,7 @@ export async function syncMessageToServer(
   sessionId: string,
   msg: ChatMessage
 ): Promise<void> {
-  await saveMessageToDB(msg, userId);
+  await saveMessageToDB(msg, userId, sessionId);
 
   await fetch('/api/chat/messages', {
     method: 'POST',
@@ -55,6 +59,6 @@ export async function loadChatHistory(
   } catch {
     /* fallback to cache */
   }
-  const cached = await getMessagesFromDB(userId);
-  return cached.filter((m) => !sessionId || true);
+  const cached = await getMessagesFromDB(userId, sessionId);
+  return cached;
 }

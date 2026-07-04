@@ -1,5 +1,8 @@
 import { NextRequest } from 'next/server';
 import { evaluateAgentGuardrail } from '@/modules/security/guardrail';
+import { getDatabaseAdapter } from '@/lib/db/adapter';
+import { createAppointment, findUser, writeAuditLog } from '@/lib/db/store';
+import { matchDepartment } from '@/utils/medical-departments';
 
 export const runtime = 'nodejs';
 
@@ -113,15 +116,97 @@ function classifyTriage(message: string): { status: 'EMERGENCY' | 'URGENT' | 'NO
   return { status, flags };
 }
 
+function generateLocalFallbackResponse(message: string, triageResult: any): string {
+  const matched = matchDepartment(message);
+  const department = matched || "Khoa Nội Tổng Quát";
+
+  if (triageResult.status === 'EMERGENCY') {
+    return `[Chế độ Ngoại tuyến] Cảnh báo khẩn cấp: Các triệu chứng của bạn chỉ ra tình trạng nguy kịch lâm sàng. Bạn vui lòng gọi ngay 115 hoặc di chuyển khẩn cấp đến phòng cấp cứu gần nhất!`;
+  }
+
+  return `[Chế độ Ngoại tuyến] Dựa trên các triệu chứng của bạn, tôi khuyên bạn nên đăng ký khám tại chuyên khoa **${department}**. Bạn có muốn tôi hỗ trợ đặt lịch khám tại khoa này không?`;
+}
+
+const MOCK_SLOTS = [
+  { id: 'slot-1', time: '08:00 - 09:00', department: 'Khoa Tai - Mũi - Họng', assignedDoctorId: 'DOC-11223' },
+  { id: 'slot-2', time: '09:00 - 10:00', department: 'Khoa Tai - Mũi - Họng', assignedDoctorId: 'DOC-11223' },
+  { id: 'slot-3', time: '10:00 - 11:00', department: 'Khoa Tai - Mũi - Họng', assignedDoctorId: 'DOC-11223' },
+  { id: 'slot-4', time: '14:00 - 15:00', department: 'Khoa Tim Mạch', assignedDoctorId: 'DOC-22334' },
+  { id: 'slot-5', time: '15:00 - 16:00', department: 'Khoa Tim Mạch', assignedDoctorId: 'DOC-22334' }
+];
+
+async function executeTool(name: string, args: any, sessionId: string) {
+  if (name === 'get_available_slots') {
+    try {
+      const adapter = getDatabaseAdapter();
+      const bookedAppointments = await adapter.all<{ slotId: string }>(
+        "SELECT slotId FROM appointments WHERE status = 'BOOKED'"
+      );
+      const bookedIds = new Set(bookedAppointments.map(a => a.slotId));
+      const available = MOCK_SLOTS.filter(s => !bookedIds.has(s.id));
+      return { slots: available };
+    } catch (e) {
+      return { error: 'Failed to query slots', slots: MOCK_SLOTS };
+    }
+  }
+
+  if (name === 'book_appointment') {
+    const { slotId } = args;
+    if (!slotId) return { error: 'Missing slotId parameter' };
+    if (!sessionId || sessionId === 'guest') {
+      return { error: 'User is not logged in. Booking requires a logged in patient session.' };
+    }
+
+    try {
+      const user = await findUser(sessionId);
+      if (!user) {
+        return { error: 'Patient account not found.' };
+      }
+
+      const slot = MOCK_SLOTS.find(s => s.id === slotId);
+      if (!slot) return { error: 'Invalid slotId.' };
+
+      const adapter = getDatabaseAdapter();
+      const existing = await adapter.get(
+        "SELECT id FROM appointments WHERE slotId = ? AND status = 'BOOKED'",
+        [slotId]
+      );
+      if (existing) return { error: 'This time slot is already booked.' };
+
+      const apt = await createAppointment({
+        patientCccd: user.cccd,
+        patientName: user.fullName,
+        doctorId: slot.assignedDoctorId,
+        department: slot.department,
+        slot: slot.time,
+        slotId: slot.id,
+        status: 'BOOKED'
+      });
+
+      await writeAuditLog(user.cccd, user.role, 'APT_BOOKED_BY_AI', `apt:${apt.id}`, '127.0.0.1');
+      return {
+        success: true,
+        message: `Đặt lịch thành công cho bệnh nhân ${user.fullName} tại ${slot.department} lúc ${slot.time}.`,
+        appointment: apt
+      };
+    } catch (e: any) {
+      return { error: `Failed to book appointment: ${e.message}` };
+    }
+  }
+
+  return { error: `Unknown tool: ${name}` };
+}
+
 // ─────────────────────── API Handler ───────────────────────
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, history, customApiKey } = body as {
+    const { message, history, customApiKey, sessionId } = body as {
       message: string;
       history?: Array<{ role: string; content: string }>;
       customApiKey?: string;
+      sessionId?: string;
     };
 
     // — Guardrail evaluation (blocks non-medical, privacy-extracting queries)
@@ -206,26 +291,88 @@ export async function POST(req: NextRequest) {
       contents = [{ role: 'user', parts: [{ text: message }] }];
     }
 
-    const geminiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-          temperature: isEmergency ? 0.1 : 0.3,
-          maxOutputTokens: 600,
-        },
-      }),
-    });
+    let geminiResponse;
+    let useFallback = false;
+    let fallbackText = '';
 
-    if (!geminiResponse.ok) {
-      const errorJson = await geminiResponse.json().catch(() => ({})) as { error?: { message?: string } };
-      const errMsg = errorJson.error?.message || geminiResponse.statusText;
-      throw new Error(`Gemini API error: ${errMsg}`);
+    try {
+      geminiResponse = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          tools: [{
+            functionDeclarations: [
+              {
+                name: "get_available_slots",
+                description: "Lấy danh sách các khung giờ khám bệnh còn trống bao gồm chuyên khoa y khoa, thời gian, và mã bác sĩ phụ trách.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {}
+                }
+              },
+              {
+                name: "book_appointment",
+                description: "Đặt lịch khám bệnh cho bệnh nhân vào một khung giờ cụ thể.",
+                parameters: {
+                  type: "OBJECT",
+                  properties: {
+                    slotId: {
+                      type: "STRING",
+                      description: "Mã định danh của khung giờ khám muốn đặt (ví dụ: slot-1, slot-2, ...)"
+                    }
+                  },
+                  required: ["slotId"]
+                }
+              }
+            ]
+          }],
+          generationConfig: {
+            temperature: isEmergency ? 0.1 : 0.3,
+            maxOutputTokens: 600,
+          },
+        }),
+      });
+
+      if (!geminiResponse.ok) {
+        const errorJson = await geminiResponse.json().catch(() => ({})) as { error?: { message?: string } };
+        console.error("Gemini API call failed. Status:", geminiResponse.status, "Error body:", JSON.stringify(errorJson));
+        useFallback = true;
+        fallbackText = generateLocalFallbackResponse(message, triageResult);
+      }
+    } catch (e: any) {
+      console.error("Fetch to Gemini failed:", e.message);
+      useFallback = true;
+      fallbackText = generateLocalFallbackResponse(message, triageResult);
     }
 
-    const reader = geminiResponse.body?.getReader();
+    if (useFallback) {
+      const encoder = new TextEncoder();
+      const mockStream = new ReadableStream({
+        async start(controller) {
+          const send = (data: object) =>
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+
+          send({ type: 'status', status: 'connected' });
+
+          const words = fallbackText.split(' ');
+          for (const word of words) {
+            send({ type: 'token', content: word + ' ' });
+            await new Promise((r) => setTimeout(r, 40));
+          }
+
+          send({ type: 'triage', status: triageResult.status, flags: triageResult.flags });
+          controller.close();
+        },
+      });
+
+      return new Response(mockStream, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' },
+      });
+    }
+
+    const reader = geminiResponse!.body?.getReader();
     const decoder = new TextDecoder();
     const encoder = new TextEncoder();
 
@@ -241,12 +388,14 @@ export async function POST(req: NextRequest) {
           send({ type: 'triage', status: triageResult.status, flags: triageResult.flags });
         }
 
+        let scannedLength = 0;
         let buffer = '';
         let braceCount = 0;
         let startIndex = -1;
         let inString = false;
         let escaped = false;
         let triageSent = triageResult.status === 'EMERGENCY';
+        let activeFunctionCall: { name: string; args: any } | null = null;
 
         while (true) {
           const { value, done } = await reader!.read();
@@ -254,7 +403,7 @@ export async function POST(req: NextRequest) {
 
           buffer += decoder.decode(value, { stream: true });
 
-          for (let i = 0; i < buffer.length; i++) {
+          for (let i = scannedLength; i < buffer.length; i++) {
             const char = buffer[i];
             if (escaped) { escaped = false; continue; }
             if (char === '\\') { escaped = true; continue; }
@@ -270,21 +419,147 @@ export async function POST(req: NextRequest) {
                   const jsonStr = buffer.slice(startIndex, i + 1);
                   try {
                     const parsed = JSON.parse(jsonStr) as {
-                      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+                      candidates?: Array<{ 
+                        content?: { 
+                          parts?: Array<{ 
+                            text?: string;
+                            functionCall?: { name: string; args?: any };
+                          }> 
+                        } 
+                      }>;
                     };
+                    
+                    const funcCall = parsed.candidates?.[0]?.content?.parts?.[0]?.functionCall;
+                    if (funcCall) {
+                      activeFunctionCall = {
+                        name: funcCall.name,
+                        args: funcCall.args || {}
+                      };
+                    }
+
                     const textContent = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (textContent) {
                       send({ type: 'token', content: textContent });
                     }
-                  } catch {
-                    // Partial chunk, ignore
+                  } catch (err: any) {
+                    console.error("[mediagent/api] JSON parse failed:", err.message, "on string:", jsonStr);
                   }
                   buffer = buffer.slice(i + 1);
                   i = -1;
                   startIndex = -1;
+                  scannedLength = 0;
+                  continue;
                 }
               }
             }
+          }
+          if (buffer.length > 0) {
+            scannedLength = buffer.length;
+          }
+        }
+
+        // If a function call was requested, execute it and call Gemini again
+        if (activeFunctionCall) {
+          console.log("[mediagent/api] Tool requested:", activeFunctionCall.name, "with args:", JSON.stringify(activeFunctionCall.args));
+          const activeSessionId = sessionId || 'guest';
+          const toolResult = await executeTool(activeFunctionCall.name, activeFunctionCall.args, activeSessionId);
+          console.log("[mediagent/api] Tool result:", JSON.stringify(toolResult));
+          
+          if (activeFunctionCall.name === 'book_appointment' && toolResult.success) {
+            send({ type: 'appointment_booked', appointment: toolResult.appointment });
+          }
+
+          const secondContents = [
+            ...contents,
+            {
+              role: 'model',
+              parts: [{
+                functionCall: {
+                  name: activeFunctionCall.name,
+                  args: activeFunctionCall.args
+                }
+              }]
+            },
+            {
+              role: 'function',
+              parts: [{
+                functionResponse: {
+                  name: activeFunctionCall.name,
+                  response: toolResult
+                }
+              }]
+            }
+          ];
+
+          const secondResponse = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: secondContents,
+              systemInstruction: { parts: [{ text: systemPrompt }] },
+              generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: 600,
+              },
+            }),
+          });
+
+          if (secondResponse.ok && secondResponse.body) {
+            const secondReader = secondResponse.body.getReader();
+            let secondScannedLength = 0;
+            let secondBuffer = '';
+            let secondBraceCount = 0;
+            let secondStartIndex = -1;
+            let secondInString = false;
+            let secondEscaped = false;
+
+            while (true) {
+              const { value, done } = await secondReader.read();
+              if (done) break;
+
+              secondBuffer += decoder.decode(value, { stream: true });
+
+              for (let i = secondScannedLength; i < secondBuffer.length; i++) {
+                const char = secondBuffer[i];
+                if (secondEscaped) { secondEscaped = false; continue; }
+                if (char === '\\') { secondEscaped = true; continue; }
+                if (char === '"') { secondInString = !secondInString; continue; }
+
+                if (!secondInString) {
+                  if (char === '{') {
+                    if (secondBraceCount === 0) secondStartIndex = i;
+                    secondBraceCount++;
+                  } else if (char === '}') {
+                    secondBraceCount--;
+                    if (secondBraceCount === 0 && secondStartIndex !== -1) {
+                      const jsonStr = secondBuffer.slice(secondStartIndex, i + 1);
+                      try {
+                        const parsed = JSON.parse(jsonStr) as {
+                          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+                        };
+                        const textContent = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (textContent) {
+                          send({ type: 'token', content: textContent });
+                        }
+                      } catch {
+                        // Ignore partial JSON parsing errors
+                      }
+                      secondBuffer = secondBuffer.slice(i + 1);
+                      i = -1;
+                      secondStartIndex = -1;
+                      secondScannedLength = 0;
+                      continue;
+                    }
+                  }
+                }
+              }
+              if (secondBuffer.length > 0) {
+                secondScannedLength = secondBuffer.length;
+              }
+            }
+          } else {
+            const errJson = await secondResponse.json().catch(() => ({}));
+            console.error("Gemini second call failed. Status:", secondResponse.status, "Error body:", JSON.stringify(errJson));
           }
         }
 

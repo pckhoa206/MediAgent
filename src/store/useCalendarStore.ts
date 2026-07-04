@@ -32,6 +32,7 @@ interface CalendarState {
   }) => Appointment | null;
   cancelAppointment: (role: 'patient' | 'doctor', userIdentifier: string, appointmentId: string) => boolean;
   initializeSlots: () => void;
+  setAppointments: (appointments: Appointment[]) => void;
 }
 
 // Seed Initial Mock Slots
@@ -86,6 +87,17 @@ export const useCalendarStore = create<CalendarState>()(
 
       initializeSlots: () => {
         set({ slots: MOCK_SLOTS, appointments: [] });
+      },
+
+      setAppointments: (appointments) => {
+        set((state) => {
+          // Sync slots status too based on appointments
+          const updatedSlots = state.slots.map(s => {
+            const isBooked = appointments.some(apt => apt.slot === s.time && apt.department === s.department && apt.status === 'BOOKED');
+            return { ...s, isBooked };
+          });
+          return { appointments, slots: updatedSlots };
+        });
       },
 
       getAppointmentsForUser: (role, userIdentifier) => {

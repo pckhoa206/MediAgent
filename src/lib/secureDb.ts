@@ -43,9 +43,9 @@ const getCryptoSecretForUser = (userId: string): string => {
 };
 
 /**
- * Saves a ChatMessage to IndexedDB, keyed by the active user's ID.
+ * Saves a ChatMessage to IndexedDB, keyed by the active user's ID and session ID.
  */
-export async function saveMessageToDB(message: ChatMessage, userId: string): Promise<void> {
+export async function saveMessageToDB(message: ChatMessage, userId: string, sessionId: string): Promise<void> {
   try {
     const db = await openDB();
     const secretKey = getCryptoSecretForUser(userId);
@@ -55,12 +55,13 @@ export async function saveMessageToDB(message: ChatMessage, userId: string): Pro
       const transaction = db.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
       
-      // Inject the userId into the record prior to saving and encrypt content
+      // Inject the userId and sessionId into the record prior to saving and encrypt content
       const record = {
         ...message,
         content: encryptedContent,
         isEncrypted: true,
-        userId: userId
+        userId: userId,
+        sessionId: sessionId
       };
       
       const request = store.put(record);
@@ -80,9 +81,9 @@ export async function saveMessageToDB(message: ChatMessage, userId: string): Pro
 }
 
 /**
- * Retrieves all chat messages from IndexedDB belonging strictly to the active user.
+ * Retrieves all chat messages from IndexedDB belonging strictly to the active user and session.
  */
-export async function getMessagesFromDB(userId: string): Promise<ChatMessage[]> {
+export async function getMessagesFromDB(userId: string, sessionId?: string): Promise<ChatMessage[]> {
   try {
     const db = await openDB();
     const secretKey = getCryptoSecretForUser(userId);
@@ -94,8 +95,10 @@ export async function getMessagesFromDB(userId: string): Promise<ChatMessage[]> 
 
       request.onsuccess = async () => {
         const results = request.result || [];
-        // Filter records strictly by the active user's ID
-        const filtered = results.filter((record: any) => record.userId === userId);
+        // Filter records strictly by the active user's ID and session ID
+        const filtered = results.filter((record: any) => 
+          record.userId === userId && (!sessionId || record.sessionId === sessionId)
+        );
         
         // Decrypt records in parallel
         const decrypted = await Promise.all(
@@ -163,5 +166,38 @@ export async function clearMessagesFromDB(userId: string): Promise<void> {
     });
   } catch (error) {
     console.error('[secureDb.ts] clearMessagesFromDB failed:', error);
+  }
+}
+
+/**
+ * Deletes a specific chat session for a user from IndexedDB.
+ */
+export async function deleteSessionFromDB(userId: string, sessionId: string): Promise<void> {
+  try {
+    const db = await openDB();
+    return new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+
+      request.onsuccess = (event) => {
+        const cursor = (event.target as any).result;
+        if (cursor) {
+          if (cursor.value.userId === userId && cursor.value.sessionId === sessionId) {
+            cursor.delete();
+          }
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+
+      request.onerror = () => {
+        console.error('[secureDb.ts] Error deleting session from DB:', request.error);
+        reject(request.error);
+      };
+    });
+  } catch (error) {
+    console.error('[secureDb.ts] deleteSessionFromDB failed:', error);
   }
 }

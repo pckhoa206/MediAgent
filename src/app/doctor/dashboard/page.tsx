@@ -6,23 +6,54 @@ import { RoleGuard } from '@/components/security/RoleGuard';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { useCalendarStore, Appointment } from '@/store/useCalendarStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { completeAppointment, fetchAppointments } from '@/modules/booking/service';
 import { Users, CheckCircle2, Clock, LogOut, ArrowLeft, Heart } from 'lucide-react';
 import Link from 'next/link';
 
 export default function DoctorPage() {
   const { status, lastMessage } = useRealtimeSync();
-  const { getAppointmentsForUser, cancelAppointment } = useCalendarStore();
-  const { doctorId, userName, logout } = useAuthStore();
+  const { getAppointmentsForUser, cancelAppointment, setAppointments } = useCalendarStore();
+  const { doctorId, userName, token, logout } = useAuthStore();
 
   const [activePatient, setActivePatient] = useState<Appointment | null>(null);
+
+  React.useEffect(() => {
+    const syncAppointments = async () => {
+      if (!token || !doctorId) return;
+      try {
+        const dbAppointments = await fetchAppointments(token);
+        const mappedAppointments = dbAppointments.map((apt) => ({
+          id: apt.id,
+          patientCccd: apt.patientCccd,
+          patientName: apt.patientName,
+          department: apt.department,
+          slot: apt.slot,
+          doctorId: apt.doctorId,
+          status: apt.status as 'BOOKED' | 'CANCELLED',
+        }));
+        setAppointments(mappedAppointments);
+      } catch (e) {
+        console.error("Failed to fetch appointments in doctor dashboard:", e);
+      }
+    };
+
+    syncAppointments();
+  }, [token, doctorId, setAppointments]);
 
   const appointments = getAppointmentsForUser('doctor', doctorId || '');
   const activeQueue = appointments.filter(apt => apt.status === 'BOOKED');
 
-  const handleEMRComplete = (appointmentId: string) => {
+  const handleEMRComplete = async (appointmentId: string) => {
     // Process/checkout appointment by canceling it from the queue
     cancelAppointment('doctor', doctorId || '', appointmentId);
     setActivePatient(null);
+    if (token) {
+      try {
+        await completeAppointment(token, appointmentId);
+      } catch (e) {
+        console.error("Failed to complete appointment on server", e);
+      }
+    }
   };
 
   return (

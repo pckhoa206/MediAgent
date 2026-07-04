@@ -1,22 +1,73 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { CalendarDays, Pill, Activity, Trash2, CalendarRange, Heart } from 'lucide-react';
 import BookingForm from './BookingForm';
 import { useCalendarStore } from '../../store/useCalendarStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import { cancelAppointmentOnServer, fetchAppointments } from '../../modules/booking/service';
+import { decryptData } from '../../lib/aesGcm';
+import { useRehabStore } from '../../store/useRehabStore';
 import Link from 'next/link';
 
 export function PatientDashboard() {
-  const { getAppointmentsForUser, cancelAppointment } = useCalendarStore();
-  const { userCccd, userName } = useAuthStore();
+  const { getAppointmentsForUser, cancelAppointment, setAppointments } = useCalendarStore();
+  const { userCccd, userName, token } = useAuthStore();
+  const { exercises, deleteExercise, completeExercise, resetExercises } = useRehabStore();
+
+  useEffect(() => {
+    const syncAppointments = async () => {
+      if (!token || !userCccd) return;
+      try {
+        const dbAppointments = await fetchAppointments(token);
+        const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+          ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+          : 'mediagent-default-secret-key-32-chars';
+        const secretKey = `${baseSecret}_${userCccd}`;
+
+        const decryptedAppointments = await Promise.all(
+          dbAppointments.map(async (apt) => {
+            let decryptedName = apt.patientName;
+            let decryptedCccd = apt.patientCccd;
+            try {
+              decryptedName = await decryptData(apt.patientName, secretKey);
+              decryptedCccd = await decryptData(apt.patientCccd, secretKey);
+            } catch (e) {
+              // Ignore decryption errors
+            }
+            return {
+              id: apt.id,
+              patientCccd: decryptedCccd,
+              patientName: decryptedName,
+              department: apt.department,
+              slot: apt.slot,
+              doctorId: apt.doctorId,
+              status: apt.status as 'BOOKED' | 'CANCELLED',
+            };
+          })
+        );
+        setAppointments(decryptedAppointments);
+      } catch (e) {
+        console.error("Failed to fetch appointments in dashboard:", e);
+      }
+    };
+
+    syncAppointments();
+  }, [token, userCccd, setAppointments]);
 
   const patientAppointments = getAppointmentsForUser('patient', userCccd || '');
   const activeAppointments = patientAppointments.filter(apt => apt.status === 'BOOKED');
 
-  const handleCancel = (id: string) => {
+  const handleCancel = async (id: string) => {
     if (window.confirm('Bạn có chắc chắn muốn hủy lịch hẹn này?')) {
       cancelAppointment('patient', userCccd || '', id);
+      if (token) {
+        try {
+          await cancelAppointmentOnServer(token, id);
+        } catch (e) {
+          console.error("Failed to cancel appointment on server", e);
+        }
+      }
     }
   };
 
@@ -137,6 +188,73 @@ export function PatientDashboard() {
           )}
         </div>
 
+      </div>
+
+      {/* Rehab Workout Schedule Section */}
+      <div className="bg-slate-900/40 backdrop-blur-md p-6 rounded-2xl border border-slate-900 space-y-4 shadow-xl">
+        <h2 className="text-sm font-bold text-slate-200 uppercase tracking-widest flex items-center gap-2">
+          <Activity className="w-4.5 h-4.5 text-teal-400" />
+          Lịch Tập Luyện Phục Hồi Chức Năng
+        </h2>
+        
+        {exercises.length === 0 ? (
+          <div className="text-center py-6 text-xs text-slate-500 italic">
+            Không có bài tập phục hồi nào được lên lịch hoặc tất cả đã bị xóa.
+            <button onClick={resetExercises} className="ml-2 text-teal-400 hover:text-teal-300 font-semibold underline">
+              Khôi phục mặc định
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {exercises.map((ex) => (
+              <div key={ex.id} className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 space-y-3 relative hover:border-slate-700 transition-colors flex flex-col justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={`text-xs font-bold ${ex.status === 'COMPLETED' ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                      {ex.name}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Bạn có chắc chắn muốn xóa bài tập này khỏi lịch trình?')) {
+                          deleteExercise(ex.id);
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-950/40 p-1.5 rounded-lg transition-all shrink-0"
+                      title="Xóa bài tập"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-slate-400 space-y-0.5 leading-relaxed font-sans">
+                    <p><span className="font-semibold text-slate-500">Thời gian:</span> {ex.duration}</p>
+                    <p><span className="font-semibold text-slate-500">Tần suất:</span> {ex.frequency}</p>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between border-t border-slate-900">
+                  <span className={`text-[8px] px-1.5 py-0.5 rounded font-black tracking-wide border ${
+                    ex.status === 'COMPLETED' 
+                      ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/15' 
+                      : 'bg-amber-950/40 text-amber-400 border-amber-500/15'
+                  }`}>
+                    {ex.status === 'COMPLETED' ? 'ĐÃ HOÀN THÀNH' : 'CHƯA HOÀN THÀNH'}
+                  </span>
+                  
+                  <button
+                    onClick={() => completeExercise(ex.id)}
+                    className={`text-[9px] font-bold px-2 py-1 rounded-lg transition-all ${
+                      ex.status === 'COMPLETED'
+                        ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                        : 'bg-teal-900/40 text-teal-300 border border-teal-500/20 hover:bg-teal-900'
+                    }`}
+                  >
+                    {ex.status === 'COMPLETED' ? 'Làm lại' : 'Hoàn thành'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
     </div>

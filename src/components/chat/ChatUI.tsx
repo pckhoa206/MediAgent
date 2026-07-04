@@ -1,7 +1,7 @@
 'use client';
 
 import DOMPurify from 'dompurify';
-import { Activity, AlertCircle, Award, Calendar, ChevronRight, Send, Shield, User, Volume2, VolumeX } from 'lucide-react';
+import { Activity, AlertCircle, Award, Calendar, ChevronRight, Send, Shield, User, Volume2, VolumeX, MessageSquare, Plus, Trash2 } from 'lucide-react';
 import type { ChatMessage } from '@/store/useChatStore';
 import { shouldShowConfidence, getConfidenceData, MEDICAL_DISCLAIMER } from '@/modules/clinical/confidence';
 import { CONFIDENCE_STRIP_PATTERNS } from '@/hooks/useSpeechOutput';
@@ -27,6 +27,13 @@ interface ChatUIProps {
   onStopSpeak: () => void;
   isSpeaking: boolean;
   onVoiceResult?: (text: string) => void;
+
+  // Multiple Sessions Props
+  sessions: string[];
+  activeSessionId: string;
+  onSelectSession: (id: string) => void;
+  onCreateSession: () => void;
+  onDeleteSession: (id: string) => void;
 }
 
 export function ChatUI({
@@ -48,11 +55,81 @@ export function ChatUI({
   onStopSpeak,
   isSpeaking,
   onVoiceResult,
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  onCreateSession,
+  onDeleteSession,
 }: ChatUIProps) {
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div
-        ref={chatScrollRef}
+    <div className="flex-1 flex md:flex-row flex-col overflow-hidden">
+      
+      {/* LEFT COLUMN: Gemini-Style Chat Sessions Sidebar */}
+      <aside className="w-full md:w-64 bg-[#090e0b] border-b md:border-b-0 md:border-r border-[#1c2e24] flex flex-col overflow-hidden select-none shrink-0">
+        {/* New Chat Button */}
+        <div className="p-4 border-b border-[#1c2e24]">
+          <button
+            type="button"
+            onClick={onCreateSession}
+            className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl bg-[#132219] hover:bg-[#1c2e24] border border-[#233c2e] text-[#aef0c7] hover:text-[#c4f8d9] text-xs font-bold transition-all duration-200 shadow-sm"
+          >
+            <Plus className="h-4 w-4" />
+            {lang === 'vi' ? 'Cuộc trò chuyện mới' : 'New Chat'}
+          </button>
+        </div>
+
+        {/* Sessions List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-[#132219]">
+          {sessions.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-500 font-medium italic">
+              {lang === 'vi' ? 'Chưa có cuộc trò chuyện nào' : 'No chats yet'}
+            </div>
+          ) : (
+            sessions.map((sess) => {
+              const isActive = sess === activeSessionId;
+              // Format a nice display name: e.g. "Session-172..." to "Cuộc hội thoại 172..." or a shorter date
+              const cleanName = sess.startsWith('chat-')
+                ? (lang === 'vi' ? 'Hội thoại ' : 'Chat ') + new Date(parseInt(sess.split('-')[1])).toLocaleTimeString(lang === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date(parseInt(sess.split('-')[1])).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US', { month: 'numeric', day: 'numeric' })
+                : sess.substring(0, 12) + '...';
+
+              return (
+                <div
+                  key={sess}
+                  onClick={() => onSelectSession(sess)}
+                  className={`group flex items-center justify-between p-2 rounded-xl text-xs font-medium cursor-pointer transition-all duration-150 ${
+                    isActive
+                      ? 'bg-[#1c2e24]/40 text-[#aef0c7] border border-[#233c2e]/40'
+                      : 'text-slate-400 hover:bg-[#0f1612] hover:text-slate-200'
+                  }`}
+                >
+                  <div className="flex-1 flex items-center gap-2 overflow-hidden py-1">
+                    <MessageSquare className={`h-3.5 w-3.5 flex-shrink-0 ${isActive ? 'text-[#7FB08E]' : 'text-slate-500'}`} />
+                    <span className="truncate">{cleanName}</span>
+                  </div>
+                  
+                  {/* Delete button (hidden by default, shown on hover) */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteSession(sess);
+                    }}
+                    className="opacity-50 group-hover:opacity-100 p-1 hover:bg-[#2b1b1b] rounded-lg text-slate-500 hover:text-red-400 transition-all duration-150"
+                    title={lang === 'vi' ? 'Xóa cuộc trò chuyện' : 'Delete chat'}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </aside>
+
+      {/* RIGHT COLUMN: Chat Area */}
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        <div
+          ref={chatScrollRef}
         role="log"
         aria-live="polite"
         aria-relevant="additions"
@@ -246,6 +323,7 @@ export function ChatUI({
           </button>
         </form>
       </footer>
+      </div> {/* End of RIGHT COLUMN */}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useChatStore } from '../../store/useChatStore';
 import { useChatStream } from '../../hooks/useChatStream';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useCalendarStore } from '../../store/useCalendarStore';
+import { cancelAppointmentOnServer } from '../../modules/booking/service';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ChatMessage } from '../../components/medical/chat-message';
@@ -14,7 +15,7 @@ import { Send, Heart, Activity, AlertCircle, RefreshCw, ChevronRight, User, Tras
 export default function ChatPage() {
   const { messages, sessionId, isEmergency, initializeSession, clearSession } = useChatStore();
   const { sendMessage, isLoading } = useChatStream();
-  const { isAuthenticated, userName, userCccd, logout } = useAuthStore();
+  const { isAuthenticated, userName, userCccd, token, logout } = useAuthStore();
   const { getAppointmentsForUser, cancelAppointment } = useCalendarStore();
   const router = useRouter();
   const [inputText, setInputText] = useState('');
@@ -245,7 +246,18 @@ export default function ChatPage() {
                       </span>
                       {apt.status === 'BOOKED' && (
                         <button
-                          onClick={() => cancelAppointment('patient', userCccd || '', apt.id)}
+                          onClick={async () => {
+                            if (window.confirm('Bạn có chắc chắn muốn hủy lịch hẹn này?')) {
+                              cancelAppointment('patient', userCccd || '', apt.id);
+                              if (token) {
+                                try {
+                                  await cancelAppointmentOnServer(token, apt.id);
+                                } catch (e) {
+                                  console.error("Failed to cancel appointment on server", e);
+                                }
+                              }
+                            }
+                          }}
                           aria-label="Hủy lịch hẹn"
                           className="text-red-400 hover:text-red-300 p-1 transition-colors"
                         >

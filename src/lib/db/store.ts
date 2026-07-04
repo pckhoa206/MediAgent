@@ -192,6 +192,21 @@ export async function getChatMessages(userId: string, sessionId?: string): Promi
   return rows as ChatMessageRecord[];
 }
 
+export async function getChatSessions(userId: string): Promise<string[]> {
+  const adapter = getDatabaseAdapter();
+  const rows = await adapter.all<{ sessionId: string }>(
+    'SELECT DISTINCT sessionId FROM chat_messages WHERE userId = ? ORDER BY timestamp DESC',
+    [userId]
+  );
+  return rows.map(r => r.sessionId).filter(Boolean);
+}
+
+export async function deleteChatSession(userId: string, sessionId: string): Promise<boolean> {
+  const adapter = getDatabaseAdapter();
+  await adapter.run('DELETE FROM chat_messages WHERE userId = ? AND sessionId = ?', [userId, sessionId]);
+  return true;
+}
+
 export async function saveEMRRecord(record: Omit<EMRRecord, 'id' | 'createdAt'>): Promise<EMRRecord> {
   const emr: EMRRecord = { ...record, id: crypto.randomUUID(), createdAt: Date.now() };
   const adapter = getDatabaseAdapter();

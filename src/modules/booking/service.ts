@@ -75,3 +75,18 @@ export async function completeAppointment(
   });
   return res.ok;
 }
+
+export async function cancelAppointmentOnServer(
+  token: string,
+  appointmentId: string
+): Promise<boolean> {
+  const res = await fetch('/api/appointments', {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ appointmentId, status: 'CANCELLED' }),
+  });
+  return res.ok;
+}
