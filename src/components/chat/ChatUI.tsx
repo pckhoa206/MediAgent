@@ -311,6 +311,8 @@ export function ChatUI({
             <SpeechToTextRecorder
               onResult={onVoiceResult}
               className="self-center pr-2"
+              uiLang={lang}
+              hideLangToggle={true}
             />
           )}
           <button

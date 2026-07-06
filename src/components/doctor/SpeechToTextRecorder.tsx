@@ -7,13 +7,26 @@ interface Props {
   onResult: (text: string) => void;
   onError?: (error: string) => void;
   className?: string;
+  uiLang?: 'vi' | 'en';
+  hideLangToggle?: boolean;
 }
 
-export default function SpeechToTextRecorder({ onResult, onError, className = '' }: Props) {
+export default function SpeechToTextRecorder({
+  onResult,
+  onError,
+  className = '',
+  uiLang = 'vi',
+  hideLangToggle = false
+}: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [volume, setVolume] = useState(0);
   const [lang, setLang] = useState<'en-US' | 'vi-VN'>('vi-VN'); // Default to vi-VN for better localization
   const [hasSpeechAPI, setHasSpeechAPI] = useState(false);
+
+  // Sync lang state with uiLang prop
+  useEffect(() => {
+    setLang(uiLang === 'en' ? 'en-US' : 'vi-VN');
+  }, [uiLang]);
 
   const recognitionRef = useRef<any>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -121,16 +134,18 @@ export default function SpeechToTextRecorder({ onResult, onError, className = ''
   return (
     <div className={`flex items-center space-x-2 ${className}`}>
       {/* Language Toggle */}
-      <select
-        value={lang}
-        onChange={(e) => setLang(e.target.value as 'en-US' | 'vi-VN')}
-        disabled={isRecording}
-        title="Select speech language"
-        className="text-[10px] border border-slate-800 bg-[#0f1712] rounded p-1 outline-none text-slate-400 disabled:opacity-50"
-      >
-        <option value="en-US">🇬🇧 EN</option>
-        <option value="vi-VN">🇻🇳 VI</option>
-      </select>
+      {!hideLangToggle && (
+        <select
+          value={lang}
+          onChange={(e) => setLang(e.target.value as 'en-US' | 'vi-VN')}
+          disabled={isRecording}
+          title="Select speech language"
+          className="text-[10px] border border-slate-800 bg-[#0f1712] rounded p-1 outline-none text-slate-400 disabled:opacity-50"
+        >
+          <option value="en-US">🇬🇧 EN</option>
+          <option value="vi-VN">🇻🇳 VI</option>
+        </select>
+      )}
 
       {/* Live Waveform */}
       {isRecording && (
