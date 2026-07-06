@@ -8,7 +8,7 @@ export interface Appointment {
   department: string;
   slot: string;
   doctorId: string;
-  status: 'BOOKED' | 'CANCELLED';
+  status: 'BOOKED' | 'CANCELLED' | 'COMPLETED';
 }
 
 export interface TimeSlot {

@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { evaluateAgentGuardrail } from '@/modules/security/guardrail';
 import { getDatabaseAdapter } from '@/lib/db/adapter';
 import { createAppointment, findUser, writeAuditLog } from '@/lib/db/store';
-import { matchDepartment } from '@/utils/medical-departments';
+import { matchDepartmentSemantic } from '@/utils/semantic-routing';
 
 export const runtime = 'nodejs';
 
@@ -116,8 +116,8 @@ function classifyTriage(message: string): { status: 'EMERGENCY' | 'URGENT' | 'NO
   return { status, flags };
 }
 
-function generateLocalFallbackResponse(message: string, triageResult: any): string {
-  const matched = matchDepartment(message);
+async function generateLocalFallbackResponse(message: string, triageResult: any, apiKey?: string): Promise<string> {
+  const matched = await matchDepartmentSemantic(message, apiKey);
   const department = matched || "Khoa Nội Tổng Quát";
 
   if (triageResult.status === 'EMERGENCY') {
@@ -339,12 +339,12 @@ export async function POST(req: NextRequest) {
         const errorJson = await geminiResponse.json().catch(() => ({})) as { error?: { message?: string } };
         console.error("Gemini API call failed. Status:", geminiResponse.status, "Error body:", JSON.stringify(errorJson));
         useFallback = true;
-        fallbackText = generateLocalFallbackResponse(message, triageResult);
+        fallbackText = await generateLocalFallbackResponse(message, triageResult, apiKey);
       }
     } catch (e: any) {
       console.error("Fetch to Gemini failed:", e.message);
       useFallback = true;
-      fallbackText = generateLocalFallbackResponse(message, triageResult);
+      fallbackText = await generateLocalFallbackResponse(message, triageResult, apiKey);
     }
 
     if (useFallback) {
