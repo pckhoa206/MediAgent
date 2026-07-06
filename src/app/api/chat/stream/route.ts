@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { detectLanguage } from '@/utils/language';
 
 export const runtime = 'nodejs'; // or 'edge'
 
@@ -9,7 +10,8 @@ const EMERGENCY_TRIGGERS = [
 
 export async function POST(req: NextRequest) {
   try {
-    const { message } = await req.json();
+    const { message, lang } = await req.json();
+    const activeLang = lang || detectLanguage(message || '') || 'vi';
     const apiKey = process.env.GEMINI_API_KEY;
 
     // Check if API Key is not set -> fallback to mock SSE stream
@@ -18,19 +20,29 @@ export async function POST(req: NextRequest) {
       const text = (message || '').toLowerCase();
       const isEmergency = EMERGENCY_TRIGGERS.some(trigger => text.includes(trigger));
 
-      const tokens = isEmergency 
-        ? [
-            " [Lưu ý: Đang chạy ở chế độ giả lập (Mock). Cấu hình GEMINI_API_KEY trong file .env.local để kết nối Gemini thật] \n\n",
-            "Chào", " bạn.", " Tôi", " phát", " hiện", " triệu", " chứng", " bạn", " mô", " tả",
-            " có", " thể", " liên", " quan", " đến", " một", " tình", " trạng", " khẩn", " cấp",
-            " về", " tim", " mạch.", " Hệ", " thống", " đã", " kích", " hoạt", " cảnh", " báo", " cấp", " cứu."
-          ]
-        : [
-            " [Lưu ý: Đang chạy ở chế độ giả lập (Mock). Cấu hình GEMINI_API_KEY trong file .env.local để kết nối Gemini thật] \n\n",
-            "Chào", " bạn.", " Tôi", " đã", " nhận", " được", " thông", " tin.", " Triệu", " chứng",
-            " của", " bạn", " có", " vẻ", " bình", " thường.", " Hãy", " nghỉ", " ngơi", " và",
-            " theo", " dõi", " thêm."
-          ];
+      const tokens = activeLang === 'en'
+        ? (isEmergency 
+          ? [
+              " [Note: Running in Mock Mode. Set GEMINI_API_KEY in .env.local to connect to real Gemini] \n\n",
+              "Hello.", " I", " detected", " symptoms", " you", " described", " that", " may", " be", " related", " to", " a", " cardiovascular", " emergency.", " The", " system", " has", " activated", " emergency", " alert."
+            ]
+          : [
+              " [Note: Running in Mock Mode. Set GEMINI_API_KEY in .env.local to connect to real Gemini] \n\n",
+              "Hello.", " I", " have", " received", " your", " information.", " Your", " symptoms", " seem", " normal.", " Please", " rest", " and", " monitor", " further."
+            ])
+        : (isEmergency 
+          ? [
+              " [Lưu ý: Đang chạy ở chế độ giả lập (Mock). Cấu hình GEMINI_API_KEY trong file .env.local để kết nối Gemini thật] \n\n",
+              "Chào", " bạn.", " Tôi", " phát", " hiện", " triệu", " chứng", " bạn", " mô", " tả",
+              " có", " thể", " liên", " quan", " đến", " một", " tình", " trạng", " khẩn", " cấp",
+              " về", " tim", " mạch.", " Hệ", " thống", " đã", " kích", " hoạt", " cảnh", " báo", " cấp", " cứu."
+            ]
+          : [
+              " [Lưu ý: Đang chạy ở chế độ giả lập (Mock). Cấu hình GEMINI_API_KEY trong file .env.local để kết nối Gemini thật] \n\n",
+              "Chào", " bạn.", " Tôi", " đã", " nhận", " được", " thông", " tin.", " Triệu", " chứng",
+              " của", " bạn", " có", " vẻ", " bình", " thường.", " Hãy", " nghỉ", " ngơi", " và",
+              " theo", " dõi", " thêm."
+            ]);
 
       const stream = new ReadableStream({
         async start(controller) {
@@ -42,7 +54,8 @@ export async function POST(req: NextRequest) {
           await new Promise((resolve) => setTimeout(resolve, 100));
 
           for (let i = 0; i < tokens.length; i++) {
-            if (isEmergency && i === 16) {
+            const triggerIndex = activeLang === 'en' ? 15 : 16;
+            if (isEmergency && i === triggerIndex) {
               sendChunk({ 
                 type: 'triage', 
                 status: 'EMERGENCY', 
@@ -74,6 +87,20 @@ export async function POST(req: NextRequest) {
     // Call Real Gemini API Streaming Endpoint
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=${apiKey}`;
 
+    const systemPrompt = activeLang === 'en'
+      ? `You are CareAgent AI — the smart and professional medical virtual assistant.
+Your task is to analyze preliminary health symptoms from the patient's message.
+Respond concisely, politely, and focus on the query in English.
+Security note: Do not guess or decrypt masked tokens like [MASKED_NAME_1], [MASKED_PHONE_1] or [MASKED_ID_1]. Respond naturally while keeping these tokens intact.
+
+Patient's message: "${message}"`
+      : `Bạn là trợ lý ảo Y khoa chuyên nghiệp MedConcierge AI.
+Nhiệm vụ của bạn là phân tích triệu chứng sức khỏe sơ bộ từ tin nhắn của bệnh nhân. 
+Trả lời ngắn gọn, lịch sự, đúng trọng tâm bằng tiếng Việt.
+Lưu ý bảo mật: Không phỏng đoán hay điền thông tin cá nhân cho các từ khóa mặt nạ như [MASKED_NAME_1], [MASKED_PHONE_1] hay [MASKED_ID_1]. Hãy phản hồi tự nhiên giữ nguyên các từ mặt nạ đó.
+
+Tin nhắn của bệnh nhân: "${message}"`;
+
     const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',
       headers: {
@@ -82,12 +109,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         contents: [{
           parts: [{
-            text: `Bạn là trợ lý ảo Y khoa chuyên nghiệp MedConcierge AI.
-Nhiệm vụ của bạn là phân tích triệu chứng sức khỏe sơ bộ từ tin nhắn của bệnh nhân. 
-Trả lời ngắn gọn, lịch sự, đúng trọng tâm bằng tiếng Việt.
-Lưu ý bảo mật: Không phỏng đoán hay điền thông tin cá nhân cho các từ khóa mặt nạ như [MASKED_NAME_1], [MASKED_PHONE_1] hay [MASKED_ID_1]. Hãy phản hồi tự nhiên giữ nguyên các từ mặt nạ đó.
-
-Tin nhắn của bệnh nhân: "${message}"`
+            text: systemPrompt
           }]
         }],
         generationConfig: {

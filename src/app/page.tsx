@@ -41,6 +41,7 @@ import { restorePII } from '@/modules/security/pii';
 import { matchDepartment, MEDICAL_DEPARTMENTS } from '@/utils/medical-departments';
 import { evaluateAgentGuardrail } from '@/modules/security/guardrail';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
+import { detectLanguage } from '@/utils/language';
 import type { Lang, TranslationKey } from '@/constants/translations';
 import { AppHeader } from '@/components/shell/AppHeader';
 import { PatientSidebar } from '@/components/shell/PatientSidebar';
@@ -898,7 +899,8 @@ export default function MEDIagentApp() {
     setChatInputText('');
     if (chatInputRef.current) chatInputRef.current.style.height = 'auto';
 
-    const guardrail = evaluateAgentGuardrail(userText);
+    const activeUserLang = lang === 'en' ? 'en' : (detectLanguage(userText) || 'vi');
+    const guardrail = evaluateAgentGuardrail(userText, activeUserLang);
     const activeUserKey = userCccd || 'guest';
 
     if (!guardrail.isAllowed) {

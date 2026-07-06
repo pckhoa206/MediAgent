@@ -3,6 +3,7 @@ import { evaluateAgentGuardrail } from '@/modules/security/guardrail';
 import { getDatabaseAdapter } from '@/lib/db/adapter';
 import { createAppointment, findUser, writeAuditLog } from '@/lib/db/store';
 import { matchDepartmentSemantic } from '@/utils/semantic-routing';
+import { detectLanguage } from '@/utils/language';
 
 export const runtime = 'nodejs';
 
@@ -277,10 +278,10 @@ export async function POST(req: NextRequest) {
       sessionId?: string;
       lang?: 'vi' | 'en';
     };
-    const activeLang = lang || 'vi';
+    const activeLang = lang || detectLanguage(message || '') || 'vi';
 
     // — Guardrail evaluation (blocks non-medical, privacy-extracting queries)
-    const guardrailResult = evaluateAgentGuardrail(message || '');
+    const guardrailResult = evaluateAgentGuardrail(message || '', activeLang);
     const isEmergency = detectEmergency(message || '');
     const triageResult = classifyTriage(message || '');
 

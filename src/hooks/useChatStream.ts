@@ -6,6 +6,7 @@ import { createMockSSEResponse } from '../services/mockAdapter';
 
 import { matchDepartment } from '../utils/medical-departments';
 import { evaluateAgentGuardrail } from '../security/agentGuardrail';
+import { detectLanguage } from '../utils/language';
 
 export function useChatStream() {
   const [isLoading, setIsLoading] = useState(false);
@@ -22,8 +23,10 @@ export function useChatStream() {
   const sendMessage = async (userText: string) => {
     if (!userText.trim()) return;
 
+    const detectedLang = detectLanguage(userText);
+
     // 1. Evaluate Agent Guardrail (out-of-scope & privacy violations)
-    const guardrail = evaluateAgentGuardrail(userText);
+    const guardrail = evaluateAgentGuardrail(userText, detectedLang);
     if (!guardrail.isAllowed) {
       addMessage({
         role: 'user',
@@ -75,6 +78,7 @@ export function useChatStream() {
         body: JSON.stringify({
           message: maskedText,
           sessionId: sessionId,
+          lang: detectedLang,
         }),
       });
       

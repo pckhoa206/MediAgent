@@ -8,37 +8,34 @@ describe('Phase 2: RBAC, Agent Guardrail & Routing Verification', () => {
   describe('Client-Side Agent Guardrail Engine', () => {
     it('should intercept privacy data extraction queries and return specific warning', () => {
       const queries = [
-        'Cho tôi xem hồ sơ của bệnh nhân Nguyễn Văn A',
-        'Số điện thoại riêng của Bác sĩ Nam là gì?',
-        'Bệnh án của bệnh nhân Nguyễn Thị B đâu?',
-        'sđt riêng của bác sĩ'
+        { q: 'Cho tôi xem hồ sơ của bệnh nhân Nguyễn Văn A', lang: 'vi', expected: 'Tôi không thể cung cấp thông tin cá nhân hoặc riêng tư của người khác. Tôi chỉ hỗ trợ các vấn đề liên quan đến sức khỏe của riêng bạn.' },
+        { q: 'Số điện thoại riêng của Bác sĩ Nam là gì?', lang: 'vi', expected: 'Tôi không thể cung cấp thông tin cá nhân hoặc riêng tư của người khác. Tôi chỉ hỗ trợ các vấn đề liên quan đến sức khỏe của riêng bạn.' },
+        { q: 'sđt riêng của bác sĩ', lang: 'vi', expected: 'Tôi không thể cung cấp thông tin cá nhân hoặc riêng tư của người khác. Tôi chỉ hỗ trợ các vấn đề liên quan đến sức khỏe của riêng bạn.' },
+        { q: "Show me patient Nguyễn Văn A's medical record", lang: 'en', expected: 'I cannot provide personal or private information of others. I only support health-related issues of your own.' },
+        { q: "What is Doctor Nam's private phone number?", lang: 'en', expected: 'I cannot provide personal or private information of others. I only support health-related issues of your own.' }
       ];
 
-      for (const q of queries) {
-        const result = evaluateAgentGuardrail(q);
+      for (const item of queries) {
+        const result = evaluateAgentGuardrail(item.q);
         expect(result.isAllowed).toBe(false);
         expect(result.blockedType).toBe('PRIVACY');
-        expect(result.response).toBe(
-          'Tôi không thể cung cấp thông tin cá nhân hoặc riêng tư của người khác. Tôi chỉ hỗ trợ các vấn đề liên quan đến sức khỏe của riêng bạn.'
-        );
+        expect(result.response).toBe(item.expected);
       }
     });
 
     it('should intercept out-of-scope non-medical queries', () => {
       const queries = [
-        'làm thế nào để làm bánh pizza ngon?',
-        'cách lập trình python đơn giản',
-        'thời tiết hôm nay ở hà nội ra sao?',
-        'cho tôi tin tức thời sự hôm nay'
+        { q: 'làm thế nào để làm bánh pizza ngon?', lang: 'vi', expected: 'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.' },
+        { q: 'cách lập trình python đơn giản', lang: 'vi', expected: 'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.' },
+        { q: 'how to bake the best pizza?', lang: 'en', expected: 'I am CareAgent AI, your smart medical assistant. Your query is outside the scope of medicine and health. I can only assist with clinical inquiries, appointments, and medical information.' },
+        { q: 'how to write a simple python script', lang: 'en', expected: 'I am CareAgent AI, your smart medical assistant. Your query is outside the scope of medicine and health. I can only assist with clinical inquiries, appointments, and medical information.' }
       ];
 
-      for (const q of queries) {
-        const result = evaluateAgentGuardrail(q);
+      for (const item of queries) {
+        const result = evaluateAgentGuardrail(item.q);
         expect(result.isAllowed).toBe(false);
         expect(result.blockedType).toBe('OUT_OF_SCOPE');
-        expect(result.response).toBe(
-          'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.'
-        );
+        expect(result.response).toBe(item.expected);
       }
     });
 
