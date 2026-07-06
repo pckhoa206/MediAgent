@@ -310,7 +310,8 @@ export default function MEDIagentApp() {
   };
 
   // Global UI states
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [devMode, setDevMode] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mediagentApiKey, setMediagentApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [developerLogs, setDeveloperLogs] = useState<string[]>([
@@ -318,6 +319,16 @@ export default function MEDIagentApp() {
     '[Security] Zero-Trust PII filter active.',
     '[Theme] Color scheme matched to CareAgent Sage/Dark-Forest green branding.'
   ]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('dev') === 'true' || params.get('debug') === 'true') {
+        setDevMode(true);
+        setIsSidebarOpen(true);
+      }
+    }
+  }, []);
 
   // Auth Store
   const { isAuthenticated, userName, userCccd, role, token, login, logout } = useAuthStore();
@@ -1322,15 +1333,17 @@ export default function MEDIagentApp() {
           )}
 
           {/* Toggle log console */}
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className={`rounded-xl border p-2 transition-all ${
-              isSidebarOpen ? 'bg-[#14231b]/40 border-[#4d7c5d]/30 text-[#7FB08E]' : 'bg-[#0f1712] border-[#1c2e24] text-slate-400 hover:text-slate-200'
-            }`}
-            title="Nhật ký bảo mật"
-          >
-            <Sliders className="h-4 w-4" />
-          </button>
+          {devMode && (
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`rounded-xl border p-2 transition-all ${
+                isSidebarOpen ? 'bg-[#14231b]/40 border-[#4d7c5d]/30 text-[#7FB08E]' : 'bg-[#0f1712] border-[#1c2e24] text-slate-400 hover:text-slate-200'
+              }`}
+              title="Nhật ký bảo mật"
+            >
+              <Sliders className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -2352,7 +2365,7 @@ export default function MEDIagentApp() {
             </div>
 
         {/* Collapsible Sidebar: Security Conflict Resolution & Log Terminal */}
-        {isSidebarOpen && (
+        {devMode && isSidebarOpen && (
           <aside className="w-80 border-l border-[#111a14] bg-[#070b09] flex flex-col shrink-0 overflow-hidden z-20">
             <div className="p-4 border-b border-[#111a14] flex items-center justify-between shrink-0 bg-[#070b09]">
               <span className="text-xs font-bold text-[#7FB08E] uppercase tracking-widest flex items-center gap-2 font-mono">
