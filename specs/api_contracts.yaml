@@ -1,0 +1,39 @@
+# /specs/api_contracts.yaml
+openapi: 3.0.3
+info:
+  title: Medical AI Chat Stream API
+  version: 1.0.0
+paths:
+  /api/chat/stream:
+    post:
+      summary: Send message and receive streamed medical/triage response (SSE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+                - sessionId
+              properties:
+                message:
+                  type: string
+                  description: PII-masked query from the patient.
+                  example: "Tôi bị [MASKED_SYMPTOM] trái lan ra tay."
+                sessionId:
+                  type: string
+                  format: uuid
+                  example: "a8f3b23d-efb9-4c12-9c1c-9e23659db12a"
+      responses:
+        '200':
+          description: Successful SSE response stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Streamed event packets representing tokens or metadata chunks.
+                example: |
+                  data: {"type": "token", "content": "Bạn"}
+                  data: {"type": "token", "content": " nên"}
+                  data: {"type": "triage", "status": "EMERGENCY", "flags": ["chest_pain"]}

@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "env": {
+    "NEXT_PUBLIC_CRYPTO_SECRET": "@mediagent-next-public-crypto-secret",
+    "MANAGED_DATABASE_URL": "@managed_database_url"
+  }
+}

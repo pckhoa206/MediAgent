@@ -1,0 +1,20 @@
+{
+  "087298123678": {
+    "cccd": "087298123678",
+    "password": "khoa061006",
+    "role": "patient",
+    "fullName": "khoa",
+    "dob": "2000-12-12",
+    "gender": "male",
+    "doctorId": ""
+  },
+  "087206014288": {
+    "cccd": "087206014288",
+    "password": "khoa061006",
+    "role": "patient",
+    "fullName": "khoa",
+    "dob": "2000-09-10",
+    "gender": "male",
+    "doctorId": ""
+  }
+}
