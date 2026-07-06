@@ -25,10 +25,10 @@ describe('Phase 2: RBAC, Agent Guardrail & Routing Verification', () => {
 
     it('should intercept out-of-scope non-medical queries', () => {
       const queries = [
-        { q: 'làm thế nào để làm bánh pizza ngon?', lang: 'vi', expected: 'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.' },
-        { q: 'cách lập trình python đơn giản', lang: 'vi', expected: 'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.' },
-        { q: 'how to bake the best pizza?', lang: 'en', expected: 'I am CareAgent AI, your smart medical assistant. Your query is outside the scope of medicine and health. I can only assist with clinical inquiries, appointments, and medical information.' },
-        { q: 'how to write a simple python script', lang: 'en', expected: 'I am CareAgent AI, your smart medical assistant. Your query is outside the scope of medicine and health. I can only assist with clinical inquiries, appointments, and medical information.' }
+        { q: 'làm thế nào để làm bánh pizza ngon?', lang: 'vi', expected: 'Rất tiếc, câu hỏi này nằm ngoài phạm vi hỗ trợ y tế của tôi. Tôi chỉ có thể giúp bạn về các vấn đề liên quan đến sức khỏe, bệnh lý hoặc thuốc men.' },
+        { q: 'cách lập trình python đơn giản', lang: 'vi', expected: 'Rất tiếc, câu hỏi này nằm ngoài phạm vi hỗ trợ y tế của tôi. Tôi chỉ có thể giúp bạn về các vấn đề liên quan đến sức khỏe, bệnh lý hoặc thuốc men.' },
+        { q: 'how to bake the best pizza?', lang: 'en', expected: 'Unfortunately, this question is outside the scope of my medical support. I can only help you with issues related to health, medical conditions, or medications.' },
+        { q: 'how to write a simple python script', lang: 'en', expected: 'Unfortunately, this question is outside the scope of my medical support. I can only help you with issues related to health, medical conditions, or medications.' }
       ];
 
       for (const item of queries) {

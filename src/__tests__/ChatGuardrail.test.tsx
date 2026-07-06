@@ -54,7 +54,7 @@ describe('Chat Guardrail UI Integration Tests', () => {
 
     // 2. The out-of-scope rejection message should appear on the screen
     await waitFor(() => {
-      expect(screen.getByText(/Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe./i)).toBeInTheDocument();
+      expect(screen.getByText(/Rất tiếc, câu hỏi này nằm ngoài phạm vi hỗ trợ y tế của tôi./i)).toBeInTheDocument();
     });
   });
 

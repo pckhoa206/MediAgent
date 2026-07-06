@@ -15,21 +15,64 @@ const PRIVACY_PATTERNS = [
 ];
 
 const MEDICAL_KEYWORDS = [
+  // Vietnamese Symptoms & Conditions
   'đau', 'mỏi', 'nhức', 'mệt', 'khó thở', 'tức ngực', 'ù tai', 'chóng mặt',
-  'sốt', 'ho', 'sổ mũi', 'cảm', 'nghẹt mũi', 'y khoa', 'sức khỏe', 'bác sĩ',
-  'khám', 'bệnh', 'thuốc', 'điều trị', 'triệu chứng', 'chẩn đoán', 'bệnh lý',
-  'viêm', 'nhiễm trùng', 'ung thư', 'tim mạch', 'dị ứng', 'tiểu buốt', 'buồn nôn',
-  'symptom', 'pain', 'fever', 'cough', 'diagnosis', 'clinical', 'health',
+  'sốt', 'ho', 'sổ mũi', 'cảm', 'nghẹt mũi', 'đau đầu', 'nhức đầu', 'đau bụng',
+  'buồn nôn', 'nôn', 'ói', 'tiêu chảy', 'táo bón', 'phát ban', 'ngứa', 'sưng',
+  'viêm', 'nhiễm trùng', 'dị ứng', 'tiểu buốt', 'co giật', 'chuột rút', 'ngất',
+  'bất tỉnh', 'đột quỵ', 'gãy xương', 'chảy máu', 'vết thương', 'bỏng',
+  
+  // Vietnamese Medical Context & Specialties
+  'y khoa', 'sức khỏe', 'bác sĩ', 'bác sỹ', 'y tá', 'dược sĩ', 'khám', 'bệnh',
+  'thuốc', 'toa', 'đơn thuốc', 'điều trị', 'triệu chứng', 'chẩn đoán', 'bệnh lý',
+  'bệnh viện', 'phòng khám', 'sơ cứu', 'cấp cứu', 'chấn thương', 'tai nạn',
+  'tim mạch', 'tiêu hóa', 'tiêu hoá', 'hô hấp', 'thần kinh', 'cơ xương khớp',
+  'da liễu', 'tai mũi họng', 'tai - mũi - họng', 'nhi', 'mắt', 'tiết niệu',
+  'sản phụ khoa', 'nội tiết', 'tâm thần', 'nội tổng quát',
+  
+  // English Symptoms & Conditions
+  'pain', 'headache', 'migraine', 'dizzy', 'dizziness', 'nausea', 'vomit', 'vomiting',
+  'diarrhea', 'constipation', 'allergy', 'allergies', 'allergic', 'fever', 'feverish',
+  'cough', 'coughing', 'sneeze', 'sneezing', 'breathless', 'shortness of breath',
+  'chest pain', 'back pain', 'stomachache', 'stomach ache', 'sore throat', 'flu', 'cold',
+  'infection', 'rash', 'itchy', 'swelling', 'swollen', 'seizure', 'faint', 'fainted',
+  'fainting', 'stroke', 'fracture', 'broken bone', 'bleeding', 'bleed', 'wound', 'wounds',
+  'cut', 'burn', 'burns', 'poison', 'poisoning',
+  
+  // English Medical Context & Specialties
+  'symptom', 'symptoms', 'diagnosis', 'clinical', 'health', 'healthcare', 'medical',
+  'medicine', 'medication', 'pill', 'prescription', 'hospital', 'clinic', 'doctor',
+  'nurse', 'physician', 'treatment', 'therapy', 'disease', 'illness', 'sick', 'patient',
+  'care', 'first aid', 'aid', 'emergency', 'cpr', 'choking', 'choke',
+  'cardiology', 'gastroenterology', 'pulmonology', 'neurology', 'rheumatology',
+  'dermatology', 'ent', 'pediatrics', 'ophthalmology', 'urology', 'gynecology',
+  'endocrinology', 'psychiatry', 'orthopedics', 'internal medicine',
+
+  // Miscellaneous English medical keywords
+  'med', 'meds', 'rehab', 'recovery', 'therapist'
 ];
 
 const SCHEDULING_KEYWORDS = [
+  // Vietnamese scheduling terms
   'đặt lịch', 'hẹn khám', 'lịch khám', 'lịch hẹn', 'book', 'schedule',
-  'appointment', 'đăng ký khám', 'lên lịch',
+  'appointment', 'đăng ký khám', 'lên lịch', 'đăng ký', 'hủy lịch', 'huỷ lịch',
+  'đổi lịch', 'khung giờ', 'chọn giờ', 'giờ khám', 'ngày khám', 'lịch hẹn khám',
+  
+  // English scheduling terms
+  'register', 'cancel', 'reschedule', 'slot', 'time slot', 'booking', 'reserve',
+  'reservation', 'calendar', 'date', 'time'
 ];
 
 const PROCEDURE_KEYWORDS = [
+  // Vietnamese procedural terms
   'thủ tục', 'bảo hiểm', 'bhyt', 'giấy xác nhận', 'mua thuốc', 'hướng dẫn',
-  'procedure', 'insurance', 'paperwork',
+  'procedure', 'insurance', 'paperwork', 'bảo hiểm y tế', 'thủ tục khám',
+  'chi phí', 'giá khám', 'thanh toán', 'giấy tờ', 'xuất viện', 'nhập viện',
+  'chuyển viện', 'miễn giảm',
+  
+  // English procedural terms
+  'insurance card', 'cost', 'price', 'fee', 'payment', 'pay', 'receipt',
+  'bill', 'admission', 'discharge', 'transfer', 'document', 'documents'
 ];
 
 const SOCIAL_PATTERNS = [
@@ -54,10 +97,10 @@ const PRIVACY_RESPONSE_EN =
   'I cannot provide personal or private information of others. I only support health-related issues of your own.';
 
 const OUT_OF_SCOPE_RESPONSE =
-  'Tôi là Trợ lý Y tế MedConcierge AI. Câu hỏi của bạn nằm ngoài phạm vi y học và sức khỏe. Tôi chỉ có thể hỗ trợ các vấn đề liên quan đến lâm sàng, lịch hẹn và hồ sơ bệnh án của bạn.';
+  'Rất tiếc, câu hỏi này nằm ngoài phạm vi hỗ trợ y tế của tôi. Tôi chỉ có thể giúp bạn về các vấn đề liên quan đến sức khỏe, bệnh lý hoặc thuốc men.';
 
 const OUT_OF_SCOPE_RESPONSE_EN =
-  'I am CareAgent AI, your smart medical assistant. Your query is outside the scope of medicine and health. I can only assist with clinical inquiries, appointments, and medical information.';
+  'Unfortunately, this question is outside the scope of my medical support. I can only help you with issues related to health, medical conditions, or medications.';
 
 function includesKeyword(text: string, keywords: string[]): boolean {
   const lower = text.toLowerCase();
