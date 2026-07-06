@@ -37,11 +37,22 @@ interface CalendarState {
 
 // Seed Initial Mock Slots
 const MOCK_SLOTS: TimeSlot[] = [
+  // ENT
   { id: 'slot-1', time: '08:00 - 09:00', department: 'Khoa Tai - Mũi - Họng', isBooked: false, assignedDoctorId: 'DOC-11223' },
   { id: 'slot-2', time: '09:00 - 10:00', department: 'Khoa Tai - Mũi - Họng', isBooked: false, assignedDoctorId: 'DOC-11223' },
   { id: 'slot-3', time: '10:00 - 11:00', department: 'Khoa Tai - Mũi - Họng', isBooked: false, assignedDoctorId: 'DOC-11223' },
+  // Cardiology
   { id: 'slot-4', time: '14:00 - 15:00', department: 'Khoa Tim Mạch', isBooked: false, assignedDoctorId: 'DOC-22334' },
-  { id: 'slot-5', time: '15:00 - 16:00', department: 'Khoa Tim Mạch', isBooked: false, assignedDoctorId: 'DOC-22334' }
+  { id: 'slot-5', time: '15:00 - 16:00', department: 'Khoa Tim Mạch', isBooked: false, assignedDoctorId: 'DOC-22334' },
+  // Orthopedics/Rheumatology
+  { id: 'slot-6', time: '08:00 - 09:00', department: 'Khoa Cơ Xương Khớp', isBooked: false, assignedDoctorId: 'DOC-33445' },
+  { id: 'slot-7', time: '09:00 - 10:00', department: 'Khoa Cơ Xương Khớp', isBooked: false, assignedDoctorId: 'DOC-33445' },
+  // Dermatology
+  { id: 'slot-8', time: '10:00 - 11:00', department: 'Khoa Da Liễu', isBooked: false, assignedDoctorId: 'DOC-44556' },
+  { id: 'slot-9', time: '14:00 - 15:00', department: 'Khoa Da Liễu', isBooked: false, assignedDoctorId: 'DOC-44556' },
+  // Pediatrics
+  { id: 'slot-10', time: '15:00 - 16:00', department: 'Khoa Nhi', isBooked: false, assignedDoctorId: 'DOC-55667' },
+  { id: 'slot-11', time: '16:00 - 17:00', department: 'Khoa Nhi', isBooked: false, assignedDoctorId: 'DOC-55667' }
 ];
 
 import CryptoJS from 'crypto-js';

@@ -328,6 +328,18 @@ export default function MEDIagentApp() {
         setDevMode(true);
         setIsSidebarOpen(true);
       }
+      // Seed default doctors if empty
+      const doctorsRaw = localStorage.getItem('registered_doctors');
+      if (!doctorsRaw) {
+        const defaultDoctors = {
+          'DOC-11223': { name: 'Bác sĩ Nguyễn Văn A', specialty: 'Khoa Tai - Mũi - Họng' },
+          'DOC-22334': { name: 'Bác sĩ Trần Hùng', specialty: 'Khoa Tim Mạch' },
+          'DOC-33445': { name: 'Bác sĩ Lê Mạnh', specialty: 'Khoa Cơ Xương Khớp' },
+          'DOC-44556': { name: 'Bác sĩ Phạm Hải', specialty: 'Khoa Da Liễu' },
+          'DOC-55667': { name: 'Bác sĩ Đỗ Minh', specialty: 'Khoa Nhi' }
+        };
+        localStorage.setItem('registered_doctors', JSON.stringify(defaultDoctors));
+      }
     }
   }, []);
 
@@ -500,6 +512,59 @@ export default function MEDIagentApp() {
       });
     }
   }, [chatMessages]);
+  const syncAppointmentsList = async () => {
+    if (!token || !userCccd) return;
+    try {
+      addDevLog(`[Sync] Fetching appointments from secure database...`);
+      const dbAppointments = await fetchAppointments(token);
+      if (role === 'patient') {
+        const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+          ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+          : 'mediagent-default-secret-key-32-chars';
+        const secretKey = `${baseSecret}_${userCccd}`;
+        
+        const decryptedAppointments = await Promise.all(
+          dbAppointments.map(async (apt) => {
+            let decryptedName = apt.patientName;
+            let decryptedCccd = apt.patientCccd;
+            try {
+              decryptedName = await decryptData(apt.patientName, secretKey);
+              decryptedCccd = await decryptData(apt.patientCccd, secretKey);
+            } catch (e) {
+              // Ignore decryption errors
+            }
+            return {
+              id: apt.id,
+              patientCccd: decryptedCccd,
+              patientName: decryptedName,
+              department: apt.department,
+              slot: apt.slot,
+              doctorId: apt.doctorId,
+              status: apt.status as 'BOOKED' | 'CANCELLED'
+            };
+          })
+        );
+        setAppointments(decryptedAppointments);
+        addDevLog(`[Sync] Decrypted & loaded ${decryptedAppointments.length} appointments.`);
+      } else if (role === 'doctor') {
+        const mappedAppointments = dbAppointments.map((apt) => ({
+          id: apt.id,
+          patientCccd: apt.patientCccd,
+          patientName: apt.patientName,
+          department: apt.department,
+          slot: apt.slot,
+          doctorId: apt.doctorId,
+          status: apt.status as 'BOOKED' | 'CANCELLED'
+        }));
+        setAppointments(mappedAppointments);
+        addDevLog(`[Sync] Loaded ${mappedAppointments.length} appointments for doctor.`);
+      }
+    } catch (e) {
+      console.error("Failed to sync appointments from database:", e);
+      addDevLog(`[Sync Error] Failed to sync appointments: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   // Load IndexedDB messages and session lists for Patient and Doctor on mount/session changes
   useEffect(() => {
     const syncData = async () => {
@@ -507,52 +572,8 @@ export default function MEDIagentApp() {
         // 1. Refresh chat sessions
         await refreshSessions();
         
-        // 2. Sync appointments from server database
-        try {
-          const dbAppointments = await fetchAppointments(token);
-          if (role === 'patient') {
-            const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
-              ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
-              : 'mediagent-default-secret-key-32-chars';
-            const secretKey = `${baseSecret}_${userCccd}`;
-            
-            const decryptedAppointments = await Promise.all(
-              dbAppointments.map(async (apt) => {
-                let decryptedName = apt.patientName;
-                let decryptedCccd = apt.patientCccd;
-                try {
-                  decryptedName = await decryptData(apt.patientName, secretKey);
-                  decryptedCccd = await decryptData(apt.patientCccd, secretKey);
-                } catch (e) {
-                  // Ignore decryption errors for mismatch
-                }
-                return {
-                  id: apt.id,
-                  patientCccd: decryptedCccd,
-                  patientName: decryptedName,
-                  department: apt.department,
-                  slot: apt.slot,
-                  doctorId: apt.doctorId,
-                  status: apt.status as 'BOOKED' | 'CANCELLED'
-                };
-              })
-            );
-            setAppointments(decryptedAppointments);
-          } else if (role === 'doctor') {
-            const mappedAppointments = dbAppointments.map((apt) => ({
-              id: apt.id,
-              patientCccd: apt.patientCccd,
-              patientName: apt.patientName,
-              department: apt.department,
-              slot: apt.slot,
-              doctorId: apt.doctorId,
-              status: apt.status as 'BOOKED' | 'CANCELLED'
-            }));
-            setAppointments(mappedAppointments);
-          }
-        } catch (e) {
-          console.error("Failed to sync appointments from database:", e);
-        }
+        // 2. Sync appointments
+        await syncAppointmentsList();
       } else {
         setChatMessages([]);
         setChatSessions([]);
@@ -1027,23 +1048,40 @@ export default function MEDIagentApp() {
               } else if (parsed.type === 'appointment_booked') {
                 const newApt = parsed.appointment;
                 if (newApt) {
-                  useCalendarStore.setState(state => {
-                    const updatedSlots = state.slots.map(s => 
-                      s.id === newApt.slotId ? { ...s, isBooked: true } : s
-                    );
-                    return {
-                      slots: updatedSlots,
-                      appointments: [...state.appointments, {
-                        id: newApt.id,
-                        patientCccd: newApt.patientCccd,
-                        patientName: newApt.patientName,
-                        department: newApt.department,
-                        slot: newApt.slot,
-                        doctorId: newApt.doctorId,
-                        status: newApt.status
-                      }]
-                    };
-                  });
+                  (async () => {
+                    const baseSecret = typeof process !== 'undefined' && process.env && process.env.NEXT_PUBLIC_CRYPTO_SECRET
+                      ? process.env.NEXT_PUBLIC_CRYPTO_SECRET
+                      : 'mediagent-default-secret-key-32-chars';
+                    const secretKey = `${baseSecret}_${userCccd}`;
+                    
+                    let decryptedName = newApt.patientName;
+                    let decryptedCccd = newApt.patientCccd;
+                    try {
+                      decryptedName = await decryptData(newApt.patientName, secretKey);
+                      decryptedCccd = await decryptData(newApt.patientCccd, secretKey);
+                    } catch (e) {
+                      console.error("Failed to decrypt live appointment:", e);
+                    }
+                    
+                    useCalendarStore.setState(state => {
+                      const updatedSlots = state.slots.map(s => 
+                        s.id === newApt.slotId ? { ...s, isBooked: true } : s
+                      );
+                      const filteredApts = state.appointments.filter(a => a.id !== newApt.id);
+                      return {
+                        slots: updatedSlots,
+                        appointments: [...filteredApts, {
+                          id: newApt.id,
+                          patientCccd: decryptedCccd,
+                          patientName: decryptedName,
+                          department: newApt.department,
+                          slot: newApt.slot,
+                          doctorId: newApt.doctorId,
+                          status: newApt.status
+                        }]
+                      };
+                    });
+                  })();
                 }
               }
             } catch (err) {
@@ -1925,10 +1963,21 @@ export default function MEDIagentApp() {
 
                                 {/* My Active Bookings */}
                                 <div className="bg-[#0f1712]/30 border border-[#1c2e24] rounded-3xl p-5 space-y-3 shadow-xl">
-                                  <h4 className="text-xxs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                                    <Clock className="w-3.5 h-3.5 text-[#7FB08E]" />
-                                    {t('activeBookingsTitle')} ({appointments.length})
-                                  </h4>
+                                  <div className="flex items-center justify-between">
+                                    <h4 className="text-xxs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                      <Clock className="w-3.5 h-3.5 text-[#7FB08E]" />
+                                      {t('activeBookingsTitle')} ({appointments.length})
+                                    </h4>
+                                    <button
+                                      type="button"
+                                      onClick={syncAppointmentsList}
+                                      className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-[#132219] hover:bg-[#1c2e24] border border-[#233c2e] text-[#aef0c7] hover:text-[#c4f8d9] text-[9px] font-bold transition-all"
+                                      title={lang === 'vi' ? 'Làm mới danh sách' : 'Refresh list'}
+                                    >
+                                      <RefreshCw className="w-2.5 h-2.5" />
+                                      <span>{lang === 'vi' ? 'Làm mới' : 'Refresh'}</span>
+                                    </button>
+                                  </div>
 
                                   {appointments.length === 0 ? (
                                     <p className="text-[10px] text-slate-500 italic">{t('noBookings')}</p>
