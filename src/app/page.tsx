@@ -977,7 +977,8 @@ export default function MEDIagentApp() {
           message: maskedText,
           history: historyPayload,
           sessionId: activeChatSessionId || activeUserKey,
-          customApiKey: mediagentApiKey || undefined
+          customApiKey: mediagentApiKey || undefined,
+          lang: lang
         }),
       });
       

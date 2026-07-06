@@ -40,10 +40,40 @@ const CLINICAL_KNOWLEDGE = `
 - Nếu phát hiện bất kỳ triệu chứng khẩn cấp nào (đau ngực, khó thở cấp, co giật, mất ý thức, xuất huyết nặng): YÊU CẦU gọi ngay 115 hoặc đến cấp cứu gần nhất.
 - Không trì hoãn tư vấn đặt lịch khi có triệu chứng khẩn cấp — hướng dẫn đến cấp cứu trực tiếp.
 
-## Khung Tư vấn An toàn
+## Khung Tư vấn An sau
 - Không đưa ra chẩn đoán xác định. Chỉ gợi ý chuyên khoa phù hợp.
 - Luôn khuyến nghị thăm khám trực tiếp với bác sĩ chuyên khoa.
 - Với triệu chứng mơ hồ hoặc không rõ: Đề nghị khám Nội Tổng hợp.
+`;
+
+const CLINICAL_KNOWLEDGE_EN = `
+## Clinical Department Routing Guidelines
+
+| Symptoms | Suitable Department |
+|---|---|
+| Chest pain, breathing difficulties, chest tightness, abnormal heart rate | Cardiology (Khoa Tim Mạch) |
+| Persistent cough, breathing difficulties, tightness when breathing | Pulmonology (Khoa Hô Hấp) |
+| Headache, dizziness, loss of balance, stroke signs | Neurology (Khoa Thần Kinh) |
+| Abdominal pain, nausea, vomiting, digestive disorders | Gastroenterology (Khoa Tiêu Hóa) |
+| Joint pain, knee pain, bone/joint issues, back pain, muscle stiffness | Rheumatology / Orthopedics (Khoa Cơ Xương Khớp) |
+| Rashes, skin itching, severe acne, hives | Dermatology (Khoa Da Liễu) |
+| Tinnitus, hearing loss, sore throat, nasal congestion | ENT (Khoa Tai Mũi Họng) |
+| Children under 16 years old with any symptoms | Pediatrics (Khoa Nhi) |
+| Eye pain, red eyes, blurred vision | Ophthalmology (Khoa Mắt) |
+| Urinary issues, kidney issues, painful urination | Urology (Khoa Tiết Niệu) |
+| Gynecological issues, pregnancy | Obstetrics & Gynecology (Khoa Sản Phụ Khoa) |
+| Diabetes, thyroid, endocrine disorders | Endocrinology (Khoa Nội Tiết) |
+| Depression, anxiety, mental disorders | Psychiatry (Khoa Tâm Thần) |
+| Trauma, fractures, accidents | Orthopedics & Trauma (Khoa Chấn Thương Chỉnh Hình) |
+
+## Emergency Triage Protocol
+- If any emergency symptoms are detected (chest pain, acute shortness of breath, seizures, loss of consciousness, severe bleeding): REQUIRE calling 115 or going to the nearest emergency department immediately.
+- Do not delay consulting or booking when emergency symptoms are present—guide them directly to the ER.
+
+## Safe Consultation Boundaries
+- Do not provide a definitive diagnosis. Only suggest the appropriate department.
+- Always recommend an in-person examination with a specialist doctor.
+- For vague or unclear symptoms: Suggest General Internal Medicine (Khoa Nội Tổng Quát).
 `;
 
 // ─────────────────────── Helpers ───────────────────────
@@ -53,7 +83,37 @@ function detectEmergency(text: string): boolean {
   return EMERGENCY_TRIGGERS.some((t) => lower.includes(t));
 }
 
-function buildSystemPrompt(isEmergency: boolean): string {
+function buildSystemPrompt(isEmergency: boolean, lang: 'vi' | 'en' = 'vi'): string {
+  if (lang === 'en') {
+    return `You are CareAgent AI — the Smart Medical Assistant of the MediAgent system.
+
+## Role & Capabilities
+You are a virtual medical assistant specialized in:
+1. Symptom consultation and suggesting appropriate clinical departments.
+2. Assisting and guiding patients in booking appointments.
+3. Answering inquiries regarding procedures and health insurance.
+4. Providing accurate, easy-to-understand medical information.
+
+## Critical PII Security
+Do NOT decrypt or replace masked tokens like [MASKED_NAME_1], [MASKED_PHONE_1], [MASKED_ID_1]. Keep these tokens exactly as they are in all responses.
+
+${CLINICAL_KNOWLEDGE_EN}
+
+## Response Formatting
+- Concise (under 300 words), friendly, and professional.
+- If suggesting a department, ask the user if they would like to book an appointment.
+- Respond STRICTLY in English.
+- Politely decline queries unrelated to medicine and health.
+
+${isEmergency ? `
+## ⚠️ WARNING: CLINICAL EMERGENCY DETECTED
+The user is describing severe symptoms. REQUIREMENTS:
+1. Immediately advise: Call emergency 115 or go to the nearest emergency room immediately.
+2. Do NOT delay with standard appointment booking guides.
+3. Provide basic first-aid instructions if applicable.
+` : ''}`;
+  }
+
   return `Bạn là CareAgent AI — Trợ lý Y tế Thông minh của hệ thống MediAgent.
 
 ## Vai trò & Quyền hạn
@@ -116,10 +176,18 @@ function classifyTriage(message: string): { status: 'EMERGENCY' | 'URGENT' | 'NO
   return { status, flags };
 }
 
-async function generateLocalFallbackResponse(message: string, triageResult: any, apiKey?: string): Promise<string> {
+async function generateLocalFallbackResponse(message: string, triageResult: any, lang: 'vi' | 'en' = 'vi', apiKey?: string): Promise<string> {
   const matched = await matchDepartmentSemantic(message, apiKey);
-  const department = matched || "Khoa Nội Tổng Quát";
 
+  if (lang === 'en') {
+    const department = matched || "General Internal Medicine";
+    if (triageResult.status === 'EMERGENCY') {
+      return `[Offline Mode] Emergency Warning: Your symptoms indicate a critical clinical condition. Please call 115 or proceed to the nearest emergency room immediately!`;
+    }
+    return `[Offline Mode] Based on your symptoms, I recommend registering for a consultation at the **${department}** department. Would you like me to assist you in booking an appointment?`;
+  }
+
+  const department = matched || "Khoa Nội Tổng Quát";
   if (triageResult.status === 'EMERGENCY') {
     return `[Chế độ Ngoại tuyến] Cảnh báo khẩn cấp: Các triệu chứng của bạn chỉ ra tình trạng nguy kịch lâm sàng. Bạn vui lòng gọi ngay 115 hoặc di chuyển khẩn cấp đến phòng cấp cứu gần nhất!`;
   }
@@ -202,12 +270,14 @@ async function executeTool(name: string, args: any, sessionId: string) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message, history, customApiKey, sessionId } = body as {
+    const { message, history, customApiKey, sessionId, lang } = body as {
       message: string;
       history?: Array<{ role: string; content: string }>;
       customApiKey?: string;
       sessionId?: string;
+      lang?: 'vi' | 'en';
     };
+    const activeLang = lang || 'vi';
 
     // — Guardrail evaluation (blocks non-medical, privacy-extracting queries)
     const guardrailResult = evaluateAgentGuardrail(message || '');
@@ -236,20 +306,35 @@ export async function POST(req: NextRequest) {
     // — Mock fallback when no API key is configured
     if (!apiKey) {
       const encoder = new TextEncoder();
-      const mockTokens = isEmergency
-        ? [
-            '[Lưu ý: Đang chạy ở chế độ Demo. Cấu hình GEMINI_API_KEY để kết nối AI thật.]\n\n',
-            '⚠️ **CẢNH BÁO KHẨN CẤP**: Dựa trên mô tả của bạn, tôi phát hiện các dấu hiệu nguy hiểm. ',
-            'Vui lòng **gọi ngay 115** hoặc đến phòng cấp cứu gần nhất **NGAY LẬP TỨC**. ',
-            'Đừng chờ đợi hoặc tự điều trị.',
-          ]
-        : [
-            '[Lưu ý: Đang chạy ở chế độ Demo. Cấu hình GEMINI_API_KEY để kết nối AI thật.]\n\n',
-            'Chào bạn! Tôi đã ghi nhận thông tin về triệu chứng của bạn. ',
-            'Dựa trên mô tả, tình trạng của bạn chưa có dấu hiệu nguy hiểm khẩn cấp. ',
-            'Bạn nên nghỉ ngơi đầy đủ, uống đủ nước và theo dõi triệu chứng. ',
-            'Nếu triệu chứng kéo dài hoặc nặng thêm, hãy đặt lịch khám tại chuyên khoa phù hợp.',
-          ];
+      const mockTokens = activeLang === 'en'
+        ? (isEmergency
+            ? [
+                '[Note: Running in Demo Mode. Configure GEMINI_API_KEY to connect to real AI.]\n\n',
+                '⚠️ **EMERGENCY WARNING**: Based on your description, I detected critical symptoms. ',
+                'Please **call 115 immediately** or proceed to the nearest emergency department **RIGHT NOW**. ',
+                'Do not wait or self-treat.',
+              ]
+            : [
+                '[Note: Running in Demo Mode. Configure GEMINI_API_KEY to connect to real AI.]\n\n',
+                'Hello! I have recorded your symptoms. ',
+                'Based on your description, your condition does not show emergency signs. ',
+                'Please rest well, drink enough water, and monitor your symptoms. ',
+                'If symptoms persist or worsen, please book an appointment with the appropriate department.',
+              ])
+        : (isEmergency
+            ? [
+                '[Lưu ý: Đang chạy ở chế độ Demo. Cấu hình GEMINI_API_KEY để kết nối AI thật.]\n\n',
+                '⚠️ **CẢNH BÁO KHẨN CẤP**: Dựa trên mô tả của bạn, tôi phát hiện các dấu hiệu nguy hiểm. ',
+                'Vui lòng **gọi ngay 115** hoặc đến phòng cấp cứu gần nhất **NGAY LẬP TỨC**. ',
+                'Đừng chờ đợi hoặc tự điều trị.',
+              ]
+            : [
+                '[Lưu ý: Đang chạy ở chế độ Demo. Cấu hình GEMINI_API_KEY để kết nối AI thật.]\n\n',
+                'Chào bạn! Tôi đã ghi nhận thông tin về triệu chứng của bạn. ',
+                'Dựa trên mô tả, tình trạng của bạn chưa có dấu hiệu nguy hiểm khẩn cấp. ',
+                'Bạn nên nghỉ ngơi đầy đủ, uống đủ nước và theo dõi triệu chứng. ',
+                'Nếu triệu chứng kéo dài hoặc nặng thêm, hãy đặt lịch khám tại chuyên khoa phù hợp.',
+              ]);
 
       const mockStream = new ReadableStream({
         async start(controller) {
@@ -276,7 +361,7 @@ export async function POST(req: NextRequest) {
     }
 
     // — Real Gemini API call with RAG-enriched system prompt
-    const systemPrompt = buildSystemPrompt(isEmergency);
+    const systemPrompt = buildSystemPrompt(isEmergency, activeLang);
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?key=${apiKey}`;
 
     type GeminiContent = { role: string; parts: Array<{ text: string }> };
@@ -339,12 +424,12 @@ export async function POST(req: NextRequest) {
         const errorJson = await geminiResponse.json().catch(() => ({})) as { error?: { message?: string } };
         console.error("Gemini API call failed. Status:", geminiResponse.status, "Error body:", JSON.stringify(errorJson));
         useFallback = true;
-        fallbackText = await generateLocalFallbackResponse(message, triageResult, apiKey);
+        fallbackText = await generateLocalFallbackResponse(message, triageResult, activeLang, apiKey);
       }
     } catch (e: any) {
       console.error("Fetch to Gemini failed:", e.message);
       useFallback = true;
-      fallbackText = await generateLocalFallbackResponse(message, triageResult, apiKey);
+      fallbackText = await generateLocalFallbackResponse(message, triageResult, activeLang, apiKey);
     }
 
     if (useFallback) {
